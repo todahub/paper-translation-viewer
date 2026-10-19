@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>論文対訳ビューア</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1><a href="#/" class="home-link">論文対訳ビューア</a></h1>
+    <div class="topbar-actions">
+      <a href="#/" class="btn">ホーム</a>
+    </div>
+  </header>
+
+  <main id="loginView" class="view" hidden>
+    <section class="panel">
+      <h2>ログイン</h2>
+      <p class="doc-meta">共有ライブラリを見るには、友達から教えてもらったパスワードを入力してください。</p>
+      <form id="loginForm">
+        <input type="password" id="passwordInput" placeholder="パスワード" required autocomplete="current-password" />
+        <button type="submit" class="btn btn-primary">ログイン</button>
+      </form>
+      <p id="loginError" class="error" hidden></p>
+    </section>
+  </main>
+
+  <main id="uploadView" class="view">
+    <section id="uploadPanel" class="panel">
+      <h2>PDFをアップロード</h2>
+      <form id="uploadForm">
+        <input type="file" id="pdfInput" accept="application/pdf" required />
+        <button type="submit" class="btn btn-primary">翻訳を開始</button>
+      </form>
+      <p id="uploadError" class="error" hidden></p>
+      <p id="uploadNotice" class="notice" hidden></p>
+    </section>
+
+    <section id="installGuide" class="panel" hidden>
+      <h2>翻訳するには Claude CLI が必要です</h2>
+      <p id="installGuideText"></p>
+      <p>
+        <a href="https://support.claude.com/en/articles/14552382-your-first-day-in-claude-code" target="_blank" rel="noopener">Claude Code（Claude CLI）の導入方法</a>
+        を参考にインストールし、ターミナルで一度 <code>claude</code> を起動してログインしたあと、このアプリを再起動してください。翻訳済みの論文はこのままでも閲覧できます。
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2 id="docListTitle">これまでに処理したPDF</h2>
+      <ul id="docList" class="doc-list"></ul>
+    </section>
+  </main>
+
+  <main id="progressView" class="view" hidden>
+    <section class="panel progress-panel">
+      <h2 id="progressTitle">翻訳中...</h2>
+      <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+      <p id="progressText"></p>
+      <p id="progressError" class="error" hidden></p>
+    </section>
+  </main>
+
+  <main id="viewerView" class="view" hidden>
+    <div class="viewer-toolbar">
+      <span id="viewerTitle"></span>
+      <div class="viewer-tabs">
+        <button id="tabPdfBtn" class="tab-btn active">PDFで比較</button>
+        <button id="tabTextBtn" class="tab-btn">テキスト対訳</button>
+        <a id="downloadJaBtn" class="btn btn-primary">日本語PDFを保存</a>
+        <button id="publishBtn" class="btn" hidden>共有ライブラリに公開</button>
+      </div>
+      <span class="hint">文をクリックすると、もう一方の対応する文がハイライトされます</span>
+      <span id="translatorInfo" class="hint"></span>
+      <span id="publishMessage" class="notice" hidden></span>
+    </div>
+    <div id="textPane" class="columns">
+      <section class="column">
+        <h2>English</h2>
+        <div id="enColumn" class="column-body"></div>
+      </section>
+      <section class="column">
+        <h2>日本語訳</h2>
+        <div id="jaColumn" class="column-body"></div>
+      </section>
+    </div>
+    <div id="pdfPane" class="pdf-columns">
+      <section class="pdf-column">
+        <h2>原文 (English) <a id="originalPdfLink" class="pdf-link" target="_blank" rel="noopener">PDFを開く</a></h2>
+        <div id="enPdf" class="pdf-scroll"></div>
+      </section>
+      <section class="pdf-column">
+        <h2>日本語訳 <a id="translatedPdfLink" class="pdf-link" target="_blank" rel="noopener">PDFを開く</a></h2>
+        <div id="jaPdf" class="pdf-scroll"></div>
+      </section>
+      <p id="pdfMessage" class="pdf-message" hidden></p>
+    </div>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

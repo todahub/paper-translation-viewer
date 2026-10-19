@@ -1,0 +1,500 @@
+import * as pdfjsLib from '/vendor/pdfjs/pdf.mjs';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.mjs';
+
+const uploadView = document.getElementById('uploadView');
+const progressView = document.getElementById('progressView');
+const viewerView = document.getElementById('viewerView');
+
+const uploadForm = document.getElementById('uploadForm');
+const pdfInput = document.getElementById('pdfInput');
+const uploadError = document.getElementById('uploadError');
+const docList = document.getElementById('docList');
+
+const progressFill = document.getElementById('progressFill');
+const progressText = document.getElementById('progressText');
+const progressError = document.getElementById('progressError');
+
+const viewerTitle = document.getElementById('viewerTitle');
+const enColumn = document.getElementById('enColumn');
+const jaColumn = document.getElementById('jaColumn');
+const tabTextBtn = document.getElementById('tabTextBtn');
+const tabPdfBtn = document.getElementById('tabPdfBtn');
+const textPane = document.getElementById('textPane');
+const pdfPane = document.getElementById('pdfPane');
+const enPdf = document.getElementById('enPdf');
+const jaPdf = document.getElementById('jaPdf');
+const pdfMessage = document.getElementById('pdfMessage');
+const originalPdfLink = document.getElementById('originalPdfLink');
+const translatedPdfLink = document.getElementById('translatedPdfLink');
+const downloadJaBtn = document.getElementById('downloadJaBtn');
+const publishBtn = document.getElementById('publishBtn');
+const publishMessage = document.getElementById('publishMessage');
+const translatorInfo = document.getElementById('translatorInfo');
+
+const loginView = document.getElementById('loginView');
+const loginForm = document.getElementById('loginForm');
+const passwordInput = document.getElementById('passwordInput');
+const loginError = document.getElementById('loginError');
+const uploadPanel = document.getElementById('uploadPanel');
+const uploadNotice = document.getElementById('uploadNotice');
+const installGuide = document.getElementById('installGuide');
+const installGuideText = document.getElementById('installGuideText');
+const docListTitle = document.getElementById('docListTitle');
+
+// What this server can do. The same page runs on the local server
+// (translate + view) and on the shared web viewer (view only, login needed).
+let caps = null;
+let currentDocId = null;
+
+let pollTimer = null;
+let currentResult = null; // { pages, sources, paragraphs: [...], meta }
+let paragraphById = new Map();
+let renderGeneration = 0;
+// side|pid|idx -> highlight elements for that sentence in the PDF view
+let rectIndex = new Map();
+
+function showView(view) {
+  for (const v of [loginView, uploadView, progressView, viewerView]) v.hidden = true;
+  view.hidden = false;
+}
+
+async function loadCapabilities() {
+  caps = await (await fetch('/api/capabilities')).json();
+  if (caps.mode === 'web') {
+    uploadPanel.hidden = true;
+    installGuide.hidden = true;
+    docListTitle.textContent = '共有ライブラリ';
+  } else if (!caps.canTranslate) {
+    uploadPanel.hidden = true;
+    installGuide.hidden = false;
+    installGuideText.textContent = caps.cli && caps.cli.installed
+      ? `インストールされている Claude CLI（${caps.cli.version}）が古く、翻訳に必要な機能（${caps.cli.missingFlags.join(', ')}）がありません。更新してください。`
+      : 'このPCには Claude CLI が見つかりませんでした。';
+  }
+}
+
+function needsLogin() {
+  return caps && caps.mode === 'web' && !caps.authenticated;
+}
+
+loginForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  loginError.hidden = true;
+  const res = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: passwordInput.value }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    loginError.hidden = false;
+    loginError.textContent = data.error || 'ログインに失敗しました';
+    return;
+  }
+  passwordInput.value = '';
+  await loadCapabilities();
+  route();
+});
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function statusLabel(state) {
+  if (state === 'done') return '完了';
+  if (state === 'error') return 'エラー';
+  return '処理中';
+}
+
+async function loadDocList() {
+  const res = await fetch('/api/documents');
+  const docs = await res.json();
+  docList.innerHTML = '';
+  if (!docs.length) {
+    docList.innerHTML = caps && caps.mode === 'web'
+      ? '<li class="doc-meta">まだ共有された論文はありません</li>'
+      : '<li class="doc-meta">まだ処理したPDFはありません</li>';
+    return;
+  }
+  for (const doc of docs) {
+    const li = document.createElement('li');
+    const left = document.createElement('div');
+    const by = doc.publishedBy ? `・公開: ${escapeHtml(doc.publishedBy)}` : '';
+    left.innerHTML = `<div class="doc-name">${escapeHtml(doc.filename)}</div>
+      <div class="doc-meta">${new Date(doc.createdAt).toLocaleString('ja-JP')}${by}</div>`;
+    const badge = document.createElement('span');
+    badge.className = 'status-badge';
+    badge.textContent = statusLabel(doc.status);
+    li.appendChild(left);
+    li.appendChild(badge);
+    li.style.cursor = 'pointer';
+    li.addEventListener('click', () => { location.hash = `#/doc/${doc.id}`; });
+    docList.appendChild(li);
+  }
+}
+
+async function openDocument(id) {
+  const statusRes = await fetch(`/api/documents/${id}/status`);
+  const status = await statusRes.json();
+  if (status.state === 'done') {
+    await loadAndRenderResult(id);
+  } else {
+    showView(progressView);
+    progressError.hidden = true;
+    watchProgress(id);
+  }
+}
+
+function watchProgress(id) {
+  stopPolling();
+  const tick = async () => {
+    const res = await fetch(`/api/documents/${id}/status`);
+    if (!res.ok) return;
+    const status = await res.json();
+    const pct = status.totalChunks ? Math.round((status.processedChunks / status.totalChunks) * 100) : 0;
+    progressFill.style.width = pct + '%';
+    if (status.message && status.state === 'processing') {
+      progressText.textContent = status.message;
+    } else {
+      progressText.textContent = status.totalChunks
+        ? `${status.processedChunks} / ${status.totalChunks} チャンクを翻訳しました`
+        : 'PDFを解析しています...';
+    }
+    if (status.state === 'done') {
+      stopPolling();
+      await loadAndRenderResult(id);
+    } else if (status.state === 'error') {
+      stopPolling();
+      progressError.hidden = false;
+      progressError.textContent = 'エラーが発生しました: ' + status.message;
+    }
+  };
+  tick();
+  pollTimer = setInterval(tick, 1500);
+}
+
+async function loadAndRenderResult(id) {
+  const res = await fetch(`/api/documents/${id}/result`);
+  const result = await res.json();
+  currentResult = result;
+  currentDocId = id;
+  paragraphById = new Map(result.paragraphs.map((p) => [p.id, p]));
+  viewerTitle.textContent = result.meta ? result.meta.filename : '';
+  downloadJaBtn.href = `/api/documents/${id}/translated.pdf?download=1`;
+  translatorInfo.textContent = describeTranslator(result);
+  publishMessage.hidden = true;
+  publishBtn.hidden = !(caps && caps.canPublish);
+  renderTextView(result);
+  showView(viewerView);
+  showPdfTab();
+  loadPdfCompare(id, result);
+}
+
+function describeTranslator(result) {
+  const t = result.translator;
+  const parts = [];
+  if (t) {
+    if (t.models && t.models.length) parts.push(`翻訳: ${t.models.join(', ')}`);
+    if (t.skill) parts.push(`Skill版 ${t.skill}`);
+  }
+  if (result.meta && result.meta.publishedBy) parts.push(`公開: ${result.meta.publishedBy}`);
+  return parts.join('・');
+}
+
+publishBtn.addEventListener('click', async () => {
+  const ok = window.confirm(
+    'この論文を共有ライブラリに公開します。\n\n'
+    + '論文のライセンスや出版社の規約が、友達内で原文と翻訳を共有することを許しているか確認しましたか？\n'
+    + '（改変禁止のライセンスなど、翻訳の共有が認められない場合があります）',
+  );
+  if (!ok || !currentDocId) return;
+  publishBtn.disabled = true;
+  publishMessage.hidden = false;
+  publishMessage.textContent = '公開しています...';
+  try {
+    const res = await fetch(`/api/documents/${currentDocId}/publish`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '公開に失敗しました');
+    publishMessage.innerHTML = `公開しました: <a href="${escapeHtml(data.url)}" target="_blank" rel="noopener">共有ライブラリで開く</a>`;
+  } catch (err) {
+    publishMessage.textContent = err.message;
+  } finally {
+    publishBtn.disabled = false;
+  }
+});
+
+function findGroup(paragraph, side, idx) {
+  for (const g of paragraph.groups) {
+    if ((side === 'en' ? g.en : g.ja).includes(idx)) return g;
+  }
+  return null;
+}
+
+// ---------- Text view ----------
+
+function renderTextView(result) {
+  enColumn.innerHTML = '';
+  jaColumn.innerHTML = '';
+  for (const para of result.paragraphs) {
+    const source = result.sources && result.sources[para.sourcePara];
+    const role = source && source.role;
+    for (const [side, column, sentences, sep] of [
+      ['en', enColumn, para.en_sentences, ' '],
+      ['ja', jaColumn, para.ja_sentences, ''],
+    ]) {
+      const p = document.createElement('p');
+      p.className = 'paragraph' + (role === 'heading' ? ' heading' : role === 'caption' ? ' caption' : '');
+      sentences.forEach((sent, i) => {
+        const span = document.createElement('span');
+        span.className = 'sent';
+        span.textContent = sent + sep;
+        span.dataset.pid = para.id;
+        span.dataset.idx = String(i + 1);
+        span.dataset.side = side;
+        p.appendChild(span);
+      });
+      column.appendChild(p);
+    }
+  }
+}
+
+function onTextSentenceClick(e) {
+  const span = e.target.closest('.sent');
+  if (!span || !currentResult) return;
+  const { pid, side } = span.dataset;
+  const paragraph = paragraphById.get(pid);
+  if (!paragraph) return;
+  const group = findGroup(paragraph, side, Number(span.dataset.idx));
+  document.querySelectorAll('.sent.active').forEach((el) => el.classList.remove('active'));
+  if (!group) {
+    span.classList.add('active');
+    return;
+  }
+  for (const i of group.en) enColumn.querySelector(`.sent[data-pid="${pid}"][data-idx="${i}"]`)?.classList.add('active');
+  for (const j of group.ja) jaColumn.querySelector(`.sent[data-pid="${pid}"][data-idx="${j}"]`)?.classList.add('active');
+  const other = side === 'en' ? jaColumn : enColumn;
+  other.querySelector('.sent.active')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+enColumn.addEventListener('click', onTextSentenceClick);
+jaColumn.addEventListener('click', onTextSentenceClick);
+
+// ---------- PDF view ----------
+
+function showPdfMessage(text) {
+  pdfMessage.textContent = text;
+  pdfMessage.hidden = false;
+}
+
+async function loadPdfCompare(id, result) {
+  const gen = ++renderGeneration;
+  rectIndex = new Map();
+  enPdf.innerHTML = '';
+  jaPdf.innerHTML = '';
+  pdfMessage.hidden = true;
+  originalPdfLink.href = `/api/documents/${id}/original.pdf`;
+  translatedPdfLink.href = `/api/documents/${id}/translated.pdf`;
+
+  if (!result.paragraphs.length || !result.paragraphs[0].en_rects) {
+    showPdfMessage('このドキュメントは古い形式で処理されているため、PDF上での対応表示は利用できません。もう一度アップロードすると利用できます。「テキスト対訳」タブは利用できます。');
+    return;
+  }
+
+  const enRects = [];
+  for (const p of result.paragraphs) {
+    p.en_rects.forEach((rects, i) => rects.forEach((r) => enRects.push({ ...r, pid: p.id, idx: i + 1 })));
+  }
+
+  const layoutRes = await fetch(`/api/documents/${id}/ja-layout`);
+  if (gen !== renderGeneration) return;
+  if (!layoutRes.ok) {
+    const err = await layoutRes.json().catch(() => ({}));
+    showPdfMessage(err.error || '日本語PDFの生成に失敗しました。');
+    return;
+  }
+  const jaLayout = await layoutRes.json();
+  const jaRects = [];
+  for (const [pid, sentences] of Object.entries(jaLayout)) {
+    sentences.forEach((rects, j) => rects.forEach((r) => jaRects.push({ ...r, pid, idx: j + 1 })));
+  }
+
+  await Promise.all([
+    renderPdf(enPdf, `/api/documents/${id}/original.pdf`, enRects, 'en', gen),
+    renderPdf(jaPdf, `/api/documents/${id}/translated.pdf`, jaRects, 'ja', gen),
+  ]);
+}
+
+async function renderPdf(container, url, rects, side, gen) {
+  const doc = await pdfjsLib.getDocument(url).promise;
+  const rectsByPage = new Map();
+  for (const r of rects) {
+    if (!rectsByPage.has(r.page)) rectsByPage.set(r.page, []);
+    rectsByPage.get(r.page).push(r);
+  }
+
+  // Create all page placeholders first so scroll positions are stable, then paint.
+  const pageViews = [];
+  for (let n = 1; n <= doc.numPages; n++) {
+    if (gen !== renderGeneration) return;
+    const page = await doc.getPage(n);
+    const vp = page.getViewport({ scale: 1 });
+    const wrap = document.createElement('div');
+    wrap.className = 'pdf-page';
+    wrap.style.aspectRatio = `${vp.width} / ${vp.height}`;
+    const canvas = document.createElement('canvas');
+    const overlay = document.createElement('div');
+    overlay.className = 'pdf-overlay';
+    for (const r of rectsByPage.get(n - 1) || []) {
+      const el = document.createElement('div');
+      el.className = 'hl';
+      el.style.left = (r.x / vp.width) * 100 + '%';
+      el.style.top = (r.y / vp.height) * 100 + '%';
+      el.style.width = (r.w / vp.width) * 100 + '%';
+      el.style.height = (r.h / vp.height) * 100 + '%';
+      el.dataset.side = side;
+      el.dataset.pid = r.pid;
+      el.dataset.idx = String(r.idx);
+      overlay.appendChild(el);
+      const key = `${side}|${r.pid}|${r.idx}`;
+      if (!rectIndex.has(key)) rectIndex.set(key, []);
+      rectIndex.get(key).push(el);
+    }
+    wrap.appendChild(canvas);
+    wrap.appendChild(overlay);
+    container.appendChild(wrap);
+    pageViews.push({ page, vp, canvas, wrap });
+  }
+
+  // Paint pages only as they approach the visible area; image-heavy papers
+  // are slow to rasterize all at once at full resolution.
+  const paint = async ({ page, vp, canvas, wrap }) => {
+    if (gen !== renderGeneration) return;
+    const cssWidth = wrap.clientWidth || container.clientWidth - 24;
+    const scale = (cssWidth / vp.width) * (window.devicePixelRatio || 1);
+    const viewport = page.getViewport({ scale });
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  };
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      observer.unobserve(entry.target);
+      const view = pageViews.find((v) => v.wrap === entry.target);
+      if (view) paint(view);
+    }
+  }, { root: container, rootMargin: '600px 0px' });
+  pageViews.forEach((v) => observer.observe(v.wrap));
+}
+
+function sentenceEls(side, pid, idx) {
+  return rectIndex.get(`${side}|${pid}|${idx}`) || [];
+}
+
+function scrollIntoContainer(container, el) {
+  const cRect = container.getBoundingClientRect();
+  const eRect = el.getBoundingClientRect();
+  const top = container.scrollTop + (eRect.top - cRect.top) - container.clientHeight / 3;
+  container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+}
+
+function onPdfClick(e) {
+  const el = e.target.closest('.hl');
+  if (!el) return;
+  const { side, pid } = el.dataset;
+  const idx = Number(el.dataset.idx);
+  const paragraph = paragraphById.get(pid);
+  if (!paragraph) return;
+  pdfPane.querySelectorAll('.hl.active').forEach((x) => x.classList.remove('active'));
+  const group = findGroup(paragraph, side, idx) || { en: side === 'en' ? [idx] : [], ja: side === 'ja' ? [idx] : [] };
+  for (const i of group.en) sentenceEls('en', pid, i).forEach((x) => x.classList.add('active'));
+  for (const j of group.ja) sentenceEls('ja', pid, j).forEach((x) => x.classList.add('active'));
+
+  const otherSide = side === 'en' ? 'ja' : 'en';
+  const otherIdx = (otherSide === 'en' ? group.en : group.ja)[0];
+  const target = otherIdx !== undefined ? sentenceEls(otherSide, pid, otherIdx)[0] : null;
+  if (target) scrollIntoContainer(otherSide === 'en' ? enPdf : jaPdf, target);
+}
+
+function setHover(e, on) {
+  const el = e.target.closest('.hl');
+  if (!el) return;
+  sentenceEls(el.dataset.side, el.dataset.pid, el.dataset.idx).forEach((x) => x.classList.toggle('hover', on));
+}
+
+for (const c of [enPdf, jaPdf]) {
+  c.addEventListener('click', onPdfClick);
+  c.addEventListener('mouseover', (e) => setHover(e, true));
+  c.addEventListener('mouseout', (e) => setHover(e, false));
+}
+
+// ---------- Tabs / upload ----------
+
+function showTextTab() {
+  tabTextBtn.classList.add('active');
+  tabPdfBtn.classList.remove('active');
+  textPane.hidden = false;
+  pdfPane.hidden = true;
+}
+
+function showPdfTab() {
+  tabTextBtn.classList.remove('active');
+  tabPdfBtn.classList.add('active');
+  textPane.hidden = true;
+  pdfPane.hidden = false;
+}
+
+tabTextBtn.addEventListener('click', showTextTab);
+tabPdfBtn.addEventListener('click', showPdfTab);
+
+uploadForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  uploadError.hidden = true;
+  const file = pdfInput.files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('pdf', file);
+  try {
+    uploadNotice.hidden = true;
+    const res = await fetch('/api/documents', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'アップロードに失敗しました');
+    pdfInput.value = '';
+    if (data.sharedUrl) {
+      uploadNotice.hidden = false;
+      uploadNotice.innerHTML = `この論文は共有ライブラリで翻訳済みです。翻訳はしませんでした。<a href="${escapeHtml(data.sharedUrl)}" target="_blank" rel="noopener">共有ライブラリで開く</a>`;
+      return;
+    }
+    location.hash = `#/doc/${data.id}`;
+  } catch (err) {
+    uploadError.hidden = false;
+    uploadError.textContent = err.message;
+  }
+});
+
+// Hash routing: "#/" is home, "#/doc/<id>" a document, so the browser's
+// back/forward buttons and shared links work.
+function route() {
+  const m = location.hash.match(/^#\/doc\/([\w-]+)/);
+  stopPolling();
+  renderGeneration++;
+  if (needsLogin()) {
+    showView(loginView);
+    passwordInput.focus();
+  } else if (m) {
+    progressError.hidden = true;
+    openDocument(m[1]);
+  } else {
+    showView(uploadView);
+    loadDocList();
+  }
+}
+
+window.addEventListener('hashchange', route);
+await loadCapabilities();
+route();
