@@ -1,4 +1,4 @@
-const { requireUploader } = require('../../_lib/auth');
+const { requirePublisher } = require('../../_lib/auth');
 const r2 = require('../../_lib/r2');
 
 const MAX_ATTEMPTS = 5;
@@ -11,7 +11,7 @@ module.exports = async (req, res) => {
     res.status(405).json({ error: 'POST only' });
     return;
   }
-  const publisher = requireUploader(req, res);
+  const publisher = await requirePublisher(req, res);
   if (!publisher) return;
 
   const { id } = req.query;
@@ -29,17 +29,18 @@ module.exports = async (req, res) => {
   const { filename, translator } = req.body || {};
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const { papers, etag } = await r2.readIndex();
-    const now = new Date().toISOString();
-    const prev = papers.find((p) => p.id === id);
+    if (papers.some((p) => p.id === id)) {
+      res.status(409).json({ error: 'この論文はすでに共有ライブラリにあります' });
+      return;
+    }
     const entry = {
       id,
-      filename: String(filename || (prev && prev.filename) || 'document.pdf').slice(0, 300),
-      createdAt: prev ? prev.createdAt : now,
-      updatedAt: now,
+      filename: String(filename || 'document.pdf').slice(0, 300),
+      createdAt: new Date().toISOString(),
       publishedBy: publisher,
       translator: translator || null,
     };
-    const next = { papers: [...papers.filter((p) => p.id !== id), entry] };
+    const next = { papers: [...papers, entry] };
     try {
       await r2.putJson(r2.INDEX_KEY, next, etag ? { ifMatch: etag } : { ifNoneMatch: '*' });
       res.status(200).json({ ok: true });

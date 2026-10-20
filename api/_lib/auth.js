@@ -1,5 +1,6 @@
-// Friends-only access: one shared viewing password (exchanged for a signed
-// session cookie) plus per-person upload tokens for publishing.
+// Friends-only access with one shared password: the browser exchanges it for
+// a signed session cookie, and a translator's local app sends it directly
+// when publishing (anyone who can log in can also publish).
 
 const crypto = require('crypto');
 
@@ -43,29 +44,29 @@ function isViewer(req) {
   return !!sig && safeEqual(sig, hmac(exp)) && Number(exp) > Date.now();
 }
 
-// UPLOAD_TOKENS="alice:tok1,bob:tok2" -> the publisher's name, or null.
-function uploaderName(req) {
-  const m = /^Bearer\s+(.+)$/.exec(req.headers.authorization || '');
-  if (!m) return null;
-  for (const entry of (process.env.UPLOAD_TOKENS || '').split(',')) {
-    const i = entry.indexOf(':');
-    if (i <= 0) continue;
-    if (safeEqual(m[1].trim(), entry.slice(i + 1).trim())) return entry.slice(0, i).trim();
-  }
-  return null;
-}
-
 function requireViewer(req, res) {
   if (isViewer(req)) return true;
   res.status(401).json({ error: 'ログインが必要です' });
   return false;
 }
 
-function requireUploader(req, res) {
-  const name = uploaderName(req);
-  if (name) return name;
-  res.status(401).json({ error: '公開用トークンが正しくありません' });
-  return null;
+// Publishing from a translator's local app: "Authorization: Bearer <password>"
+// plus a self-declared display name in X-Publisher-Name (URI-encoded, since
+// headers must be ASCII). Returns the name, or null after sending 401.
+async function requirePublisher(req, res) {
+  const m = /^Bearer\s+(.+)$/.exec(req.headers.authorization || '');
+  if (!m || !checkPassword(m[1].trim())) {
+    await new Promise((r) => setTimeout(r, 800));
+    res.status(401).json({ error: 'パスワードが違います' });
+    return null;
+  }
+  let name = '';
+  try {
+    name = decodeURIComponent(req.headers['x-publisher-name'] || '');
+  } catch {
+    name = '';
+  }
+  return name.trim().slice(0, 40) || '名前なし';
 }
 
-module.exports = { checkPassword, sessionCookie, isViewer, requireViewer, requireUploader, uploaderName };
+module.exports = { checkPassword, sessionCookie, isViewer, requireViewer, requirePublisher };

@@ -4,8 +4,8 @@
 
 - 閲覧用Webアプリ: Vercel（このリポジトリの `public/` と `api/`）
 - ファイルの保存先: Cloudflare R2（非公開のバケット）
-- 閲覧: 共通パスワードでログインした人だけ
-- 公開: 個別に渡した「公開用トークン」を持つ人だけ
+- 閲覧と公開: 共通パスワードを知っている人なら誰でも（公開者の名前は各自が設定する自己申告）
+- すでに共有されている論文は、別の人の公開で上書きできない
 
 ## 1. Cloudflare R2
 
@@ -39,20 +39,19 @@ PDF は Vercel を経由せず、ブラウザが R2 から直接取得します�
 | `R2_ACCESS_KEY_ID` | 1-2 の Access Key ID |
 | `R2_SECRET_ACCESS_KEY` | 1-2 の Secret Access Key |
 | `R2_BUCKET` | バケット名（例: `paper-library`） |
-| `VIEW_PASSWORD` | 閲覧用の共通パスワード |
+| `VIEW_PASSWORD` | 閲覧と公開に使う共通パスワード |
 | `SESSION_SECRET` | ログイン状態の署名に使う長いランダム文字列（`openssl rand -hex 32` などで作る） |
-| `UPLOAD_TOKENS` | 公開できる人の一覧。`名前:トークン` をカンマ区切り（例: `kenta:xxxx,tanaka:yyyy`）。トークンは `openssl rand -hex 24` などで人ごとに作る |
 
 3. デプロイしたら、表示されたドメインを 1-4 の CORS の `AllowedOrigins` に入れる。
 
 ## 3. 友達に渡すもの
 
 - **閲覧だけの人**: Web の URL と `VIEW_PASSWORD`
-- **翻訳して公開もする人**: 上に加えて、本人用のトークンと、`docs/translator-setup.md` の手順
+- **翻訳して公開もする人**: 上と同じものに加えて、`docs/translator-setup.md` の手順（リポジトリへの招待も）
 
 ## 運用メモ
 
 - 1論文あたり約30MB（原文PDF＋日本語PDF＋JSON）。R2 の無料枠 10GB で約300本が目安。
-- パスワードが漏れたら `VIEW_PASSWORD` と `SESSION_SECRET` を変えて再デプロイする（全員が再ログインになる）。
-- 特定の人の公開を止めるには、`UPLOAD_TOKENS` からその人を消して再デプロイする。
+- パスワードが漏れたら `VIEW_PASSWORD` と `SESSION_SECRET` を変えて再デプロイする（全員が再ログインになり、翻訳する人は `config.local.json` のパスワードも書き換える）。パスワードを知っている人は論文を追加できるので、閲覧だけの人にも気軽に広めないこと。
+- 共有済みの論文を差し替えたいときは、R2 の管理画面で `papers/<ID>/` と `index.json` 内の該当項目を消してから公開し直す。
 - 共有してよいかは論文のライセンス次第。改変禁止（ND）のライセンスでは、翻訳の共有が認められない場合がある。

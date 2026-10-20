@@ -1,4 +1,4 @@
-const { requireUploader } = require('../_lib/auth');
+const { requirePublisher } = require('../_lib/auth');
 const r2 = require('../_lib/r2');
 
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
@@ -10,11 +10,18 @@ module.exports = async (req, res) => {
     res.status(405).json({ error: 'POST only' });
     return;
   }
-  if (!requireUploader(req, res)) return;
+  if (!(await requirePublisher(req, res))) return;
 
   const { id, files } = req.body || {};
   if (!r2.isPaperId(id) || !Array.isArray(files)) {
     res.status(400).json({ error: 'invalid request' });
+    return;
+  }
+  // Anyone who knows the password can publish, so never hand out upload URLs
+  // that would overwrite a paper someone else already shared.
+  const { papers } = await r2.readIndex();
+  if (papers.some((p) => p.id === id)) {
+    res.status(409).json({ error: 'この論文はすでに共有ライブラリにあります' });
     return;
   }
   const names = files.map((f) => f.name).sort();
