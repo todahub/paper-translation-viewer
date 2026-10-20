@@ -46,6 +46,20 @@
       </p>
     </section>
 
+    <section id="addGuide" class="panel" hidden>
+      <h2>論文を追加するには</h2>
+      <p>
+        翻訳は各自のPCの Claude CLI で行うため、このページからは追加できません。翻訳用アプリ（このリポジトリ）を自分のPCで起動し、
+        翻訳が終わった論文の「共有ライブラリに公開」ボタンから追加します。準備の手順はリポジトリの <code>docs/translator-setup.md</code> にあります。
+      </p>
+    </section>
+
+    <section id="claimsPanel" class="panel" hidden>
+      <h2>いま翻訳中の論文</h2>
+      <p class="doc-meta">同じ論文を二重に翻訳しないよう、誰かが翻訳を始めるとここに表示されます（公開されるか、12時間たつと消えます）。</p>
+      <ul id="claimList" class="doc-list"></ul>
+    </section>
+
     <section class="panel">
       <h2 id="docListTitle">これまでに処理したPDF</h2>
       <ul id="docList" class="doc-list"></ul>

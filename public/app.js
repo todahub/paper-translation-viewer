@@ -41,6 +41,9 @@ const uploadNotice = document.getElementById('uploadNotice');
 const installGuide = document.getElementById('installGuide');
 const installGuideText = document.getElementById('installGuideText');
 const docListTitle = document.getElementById('docListTitle');
+const addGuide = document.getElementById('addGuide');
+const claimsPanel = document.getElementById('claimsPanel');
+const claimList = document.getElementById('claimList');
 
 // What this server can do. The same page runs on the local server
 // (translate + view) and on the shared web viewer (view only, login needed).
@@ -64,6 +67,7 @@ async function loadCapabilities() {
   if (caps.mode === 'web') {
     uploadPanel.hidden = true;
     installGuide.hidden = true;
+    addGuide.hidden = false;
     docListTitle.textContent = '共有ライブラリ';
   } else if (!caps.canTranslate) {
     uploadPanel.hidden = true;
@@ -71,6 +75,34 @@ async function loadCapabilities() {
     installGuideText.textContent = caps.cli && caps.cli.installed
       ? `インストールされている Claude CLI（${caps.cli.version}）が古く、翻訳に必要な機能（${caps.cli.missingFlags.join(', ')}）がありません。更新してください。`
       : 'このPCには Claude CLI が見つかりませんでした。';
+  }
+}
+
+function timeAgo(iso) {
+  const min = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+  if (min < 1) return 'たった今';
+  if (min < 60) return `${min}分前`;
+  return `${Math.floor(min / 60)}時間前`;
+}
+
+// The shared "who is translating what" board. On the web it comes straight
+// from the library; locally it's relayed by the local server (only when
+// publishing to a shared library is configured).
+async function loadClaims() {
+  const url = caps.mode === 'web' ? '/api/claims' : (caps.canPublish ? '/api/shared-claims' : null);
+  if (!url) {
+    claimsPanel.hidden = true;
+    return;
+  }
+  const res = await fetch(url);
+  const claims = res.ok ? (await res.json()).claims : [];
+  claimsPanel.hidden = false;
+  claimList.innerHTML = claims.length ? '' : '<li class="doc-meta">いま翻訳中の論文はありません</li>';
+  for (const c of claims.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))) {
+    const li = document.createElement('li');
+    li.innerHTML = `<div><div class="doc-name">${escapeHtml(c.title || c.filename)}</div>
+      <div class="doc-meta">${escapeHtml(c.by)} さんが翻訳中・${timeAgo(c.startedAt)}から</div></div>`;
+    claimList.appendChild(li);
   }
 }
 
@@ -125,8 +157,9 @@ async function loadDocList() {
     const li = document.createElement('li');
     const left = document.createElement('div');
     const by = doc.publishedBy ? `・公開: ${escapeHtml(doc.publishedBy)}` : '';
-    left.innerHTML = `<div class="doc-name">${escapeHtml(doc.filename)}</div>
-      <div class="doc-meta">${new Date(doc.createdAt).toLocaleString('ja-JP')}${by}</div>`;
+    const file = doc.title ? `・${escapeHtml(doc.filename)}` : '';
+    left.innerHTML = `<div class="doc-name">${escapeHtml(doc.title || doc.filename)}</div>
+      <div class="doc-meta">${new Date(doc.createdAt).toLocaleString('ja-JP')}${by}${file}</div>`;
     const badge = document.createElement('span');
     badge.className = 'status-badge';
     badge.textContent = statusLabel(doc.status);
@@ -452,29 +485,43 @@ function showPdfTab() {
 tabTextBtn.addEventListener('click', showTextTab);
 tabPdfBtn.addEventListener('click', showPdfTab);
 
-uploadForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
+async function submitUpload(force) {
   uploadError.hidden = true;
+  uploadNotice.hidden = true;
   const file = pdfInput.files[0];
   if (!file) return;
   const formData = new FormData();
   formData.append('pdf', file);
+  if (force) formData.append('force', '1');
   try {
-    uploadNotice.hidden = true;
     const res = await fetch('/api/documents', { method: 'POST', body: formData });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'アップロードに失敗しました');
-    pdfInput.value = '';
     if (data.sharedUrl) {
+      pdfInput.value = '';
       uploadNotice.hidden = false;
       uploadNotice.innerHTML = `この論文は共有ライブラリで翻訳済みです。翻訳はしませんでした。<a href="${escapeHtml(data.sharedUrl)}" target="_blank" rel="noopener">共有ライブラリで開く</a>`;
       return;
     }
+    if (data.inProgress) {
+      const c = data.inProgress;
+      uploadNotice.hidden = false;
+      uploadNotice.innerHTML = `${escapeHtml(c.by)} さんがこの論文を翻訳中です（${timeAgo(c.startedAt)}から）。公開されるのを待つと、自分のClaudeの利用枠を使わずに読めます。
+        <button type="button" id="forceUploadBtn" class="btn">それでも自分で翻訳する</button>`;
+      document.getElementById('forceUploadBtn').addEventListener('click', () => submitUpload(true));
+      return;
+    }
+    pdfInput.value = '';
     location.hash = `#/doc/${data.id}`;
   } catch (err) {
     uploadError.hidden = false;
     uploadError.textContent = err.message;
   }
+}
+
+uploadForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  submitUpload(false);
 });
 
 // Hash routing: "#/" is home, "#/doc/<id>" a document, so the browser's
@@ -492,6 +539,7 @@ function route() {
   } else {
     showView(uploadView);
     loadDocList();
+    loadClaims();
   }
 }
 

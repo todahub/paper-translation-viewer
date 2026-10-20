@@ -9,6 +9,7 @@ module.exports = async (req, res) => {
     .map((p) => ({
       id: p.id,
       filename: p.filename,
+      title: p.title,
       createdAt: p.createdAt,
       status: 'done',
       publishedBy: p.publishedBy,

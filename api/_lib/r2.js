@@ -88,6 +88,39 @@ async function readIndex() {
   return got ? { papers: got.data.papers || [], etag: got.etag } : { papers: [], etag: null };
 }
 
+class UpdateAborted extends Error {}
+
+// Read-modify-write a shared JSON object safely when several friends act at
+// once: the write only succeeds if nobody changed it since we read it,
+// otherwise re-read and retry. `mutate(data)` returns the new value, or
+// throws UpdateAborted (with a payload) to stop without writing.
+async function updateJson(key, empty, mutate, maxAttempts = 5) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const got = await getJson(key);
+    const next = mutate(got ? got.data : empty);
+    try {
+      await putJson(key, next, got ? { ifMatch: got.etag } : { ifNoneMatch: '*' });
+      return next;
+    } catch (err) {
+      const status = err.$metadata && err.$metadata.httpStatusCode;
+      if (status !== 412 && status !== 409) throw err;
+    }
+  }
+  throw new Error('同時に更新が行われたため保存できませんでした。もう一度お試しください。');
+}
+
+// "Who is translating what": claims.json holds one entry per paper someone
+// started translating, until it is published or goes stale.
+const CLAIMS_KEY = 'claims.json';
+const CLAIM_TTL_MS = 12 * 60 * 60 * 1000;
+const activeClaims = (claims) => (claims || []).filter((c) => Date.now() - Date.parse(c.updatedAt) < CLAIM_TTL_MS);
+
+async function readClaims() {
+  const got = await getJson(CLAIMS_KEY);
+  return activeClaims(got ? got.data.claims : []);
+}
+
 module.exports = {
-  PAPER_FILES, INDEX_KEY, isPaperId, paperKey, getJson, putJson, exists, presignGet, presignPut, readIndex,
+  PAPER_FILES, INDEX_KEY, CLAIMS_KEY, isPaperId, paperKey, getJson, putJson, exists, presignGet, presignPut,
+  readIndex, updateJson, UpdateAborted, activeClaims, readClaims,
 };

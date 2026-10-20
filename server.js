@@ -42,6 +42,20 @@ app.get('/api/documents', (req, res) => {
   res.json(store.listDocuments());
 });
 
+// The shared "who is translating what" board, relayed so the local page can
+// show it too (the browser can't send the shared password itself).
+app.get('/api/shared-claims', async (req, res) => {
+  if (!shareConfig) {
+    res.json({ claims: [] });
+    return;
+  }
+  try {
+    res.json({ claims: await shareClient.listClaims(shareConfig) });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
 app.post('/api/documents', upload.single('pdf'), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: 'pdf ファイルが見つかりません' });
@@ -79,12 +93,37 @@ app.post('/api/documents', upload.single('pdf'), async (req, res) => {
     return;
   }
 
-  const id = store.createDocument(req.file.originalname || 'document.pdf', hash);
+  const filename = req.file.originalname || 'document.pdf';
+
+  // Tell friends "I'm translating this" so nobody starts the same paper.
+  // If someone else already is, stop unless the user chose to go ahead.
+  if (shareConfig) {
+    try {
+      await shareClient.claim(shareConfig, { id: hash, filename, force: req.body.force === '1' });
+    } catch (err) {
+      if (err.claim) {
+        res.json({ inProgress: err.claim });
+        return;
+      }
+      console.warn('could not register as translating:', err.message);
+    }
+  }
+
+  const id = store.createDocument(filename, hash);
   fs.writeFileSync(store.paths(id).pdf, req.file.buffer);
 
-  runPipeline(id, req.file.buffer, { model: req.body.model }).catch((err) => {
-    store.writeStatus(id, { state: 'error', processedChunks: 0, totalChunks: 0, message: String(err) });
-  });
+  const onTitle = shareConfig
+    ? (title) => shareClient.claim(shareConfig, { id: hash, filename, title, force: true }).catch(() => {})
+    : undefined;
+  runPipeline(id, req.file.buffer, { model: req.body.model, onTitle })
+    .catch((err) => {
+      store.writeStatus(id, { state: 'error', processedChunks: 0, totalChunks: 0, message: String(err) });
+    })
+    .then(() => {
+      // A failed translation shouldn't keep the paper marked as taken.
+      const status = store.readStatus(id);
+      if (shareConfig && status && status.state === 'error') shareClient.releaseClaim(shareConfig, hash).catch(() => {});
+    });
 
   res.json({ id, reused: false });
 });
