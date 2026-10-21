@@ -45,6 +45,9 @@ const addGuide = document.getElementById('addGuide');
 const claimsPanel = document.getElementById('claimsPanel');
 const claimList = document.getElementById('claimList');
 const docListNote = document.getElementById('docListNote');
+const connectPanel = document.getElementById('connectPanel');
+const connectForm = document.getElementById('connectForm');
+const connectError = document.getElementById('connectError');
 const sharedPanel = document.getElementById('sharedPanel');
 const sharedList = document.getElementById('sharedList');
 
@@ -71,6 +74,7 @@ function showView(view) {
 
 async function loadCapabilities() {
   caps = await (await fetch('/api/capabilities')).json();
+  connectPanel.hidden = !(caps.mode === 'local' && !caps.canPublish);
   if (caps.mode === 'web') {
     uploadPanel.hidden = true;
     installGuide.hidden = true;
@@ -112,6 +116,34 @@ async function loadClaims() {
     claimList.appendChild(li);
   }
 }
+
+connectForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  connectError.hidden = true;
+  const button = connectForm.querySelector('button');
+  button.disabled = true;
+  try {
+    const res = await fetch('/api/share-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        shareUrl: document.getElementById('shareUrlInput').value,
+        password: document.getElementById('sharePasswordInput').value,
+        name: document.getElementById('shareNameInput').value,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '接続に失敗しました');
+    document.getElementById('sharePasswordInput').value = '';
+    await loadCapabilities();
+    route();
+  } catch (err) {
+    connectError.hidden = false;
+    connectError.textContent = err.message;
+  } finally {
+    button.disabled = false;
+  }
+});
 
 function needsLogin() {
   return caps && caps.mode === 'web' && !caps.authenticated;

@@ -97,6 +97,8 @@ a.btn { text-decoration: none; display: inline-block; }
 .error { color: #b02a2a; font-size: 13px; }
 .notice { color: var(--text); font-size: 13px; background: var(--accent-soft); padding: 8px 12px; border-radius: 6px; }
 #loginForm { display: flex; gap: 10px; flex-wrap: wrap; }
+.connect-form { display: flex; gap: 10px; flex-wrap: wrap; }
+.connect-form input { padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; flex: 1 1 180px; }
 #passwordInput { padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
 
 .progress-panel { text-align: center; }

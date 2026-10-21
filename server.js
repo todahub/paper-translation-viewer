@@ -10,7 +10,7 @@ const { ensureTranslatedPdf } = require('./lib/pdfGenerate');
 const { getCliInfo } = require('./lib/claudeTranslate');
 const shareClient = require('./lib/shareClient');
 
-const shareConfig = shareClient.loadShareConfig();
+let shareConfig = shareClient.loadShareConfig();
 
 const PORT = process.env.PORT || 3000;
 const upload = multer({
@@ -40,6 +40,25 @@ app.get('/api/capabilities', async (req, res) => {
 
 app.get('/api/documents', (req, res) => {
   res.json(store.listDocuments());
+});
+
+// Connect this app to a shared library from the page instead of hand-editing
+// config.local.json. Only from this PC itself: the app is reachable over the
+// LAN, and nobody else should be able to redirect where papers get published.
+app.post('/api/share-config', async (req, res) => {
+  const ip = req.socket.remoteAddress || '';
+  if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip)) {
+    res.status(403).json({ error: '接続設定はこのPCからのみ変更できます' });
+    return;
+  }
+  try {
+    const cfg = await shareClient.verifyShareConfig(req.body || {});
+    shareClient.saveShareConfig(cfg);
+    shareConfig = cfg;
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // With a shared library configured it is the single source of truth: the

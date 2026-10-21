@@ -46,6 +46,18 @@
       </p>
     </section>
 
+    <section id="connectPanel" class="panel" hidden>
+      <h2>共有ライブラリに接続</h2>
+      <p class="doc-meta">接続すると、翻訳した論文をここから共有ライブラリに公開できます。URL は Vercel の Settings → Domains に出ている本番用のもの、パスワードは閲覧用と同じものです。</p>
+      <form id="connectForm" class="connect-form">
+        <input type="url" id="shareUrlInput" placeholder="https://〇〇.vercel.app" required />
+        <input type="password" id="sharePasswordInput" placeholder="パスワード" required autocomplete="off" />
+        <input type="text" id="shareNameInput" placeholder="表示する名前" required maxlength="40" />
+        <button type="submit" class="btn btn-primary">接続</button>
+      </form>
+      <p id="connectError" class="error" hidden></p>
+    </section>
+
     <section id="addGuide" class="panel" hidden>
       <h2>論文を追加するには</h2>
       <p>
