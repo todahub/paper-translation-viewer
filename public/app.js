@@ -428,6 +428,11 @@ function findGroup(paragraph, side, idx) {
 
 // ---------- Text view ----------
 
+function withFormulas(text, math) {
+  if (!math) return text;
+  return text.replace(/\{(v\d+)\}/g, (m, id) => (math[id] ? math[id].text : m));
+}
+
 function renderTextView(result) {
   enColumn.innerHTML = '';
   jaColumn.innerHTML = '';
@@ -443,7 +448,8 @@ function renderTextView(result) {
       sentences.forEach((sent, i) => {
         const span = document.createElement('span');
         span.className = 'sent';
-        span.textContent = sent + sep;
+        // {v1} etc. in the Japanese stand for the paper's inline formulas.
+        span.textContent = (side === 'ja' ? withFormulas(sent, para.math) : sent) + sep;
         span.dataset.pid = para.id;
         span.dataset.idx = String(i + 1);
         span.dataset.side = side;
