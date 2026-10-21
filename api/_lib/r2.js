@@ -112,6 +112,9 @@ async function updateJson(key, empty, mutate, maxAttempts = 5) {
 // "Who is translating what": claims.json holds one entry per paper someone
 // started translating, until it is published or goes stale.
 const CLAIMS_KEY = 'claims.json';
+// The shared term base: the Japanese chosen for each technical term, so every
+// paper (whoever translates it) uses the same renderings.
+const TERMS_KEY = 'terms.json';
 const CLAIM_TTL_MS = 12 * 60 * 60 * 1000;
 const activeClaims = (claims) => (claims || []).filter((c) => Date.now() - Date.parse(c.updatedAt) < CLAIM_TTL_MS);
 
@@ -121,6 +124,6 @@ async function readClaims() {
 }
 
 module.exports = {
-  PAPER_FILES, INDEX_KEY, CLAIMS_KEY, isPaperId, paperKey, getJson, putJson, exists, presignGet, presignPut,
+  PAPER_FILES, INDEX_KEY, CLAIMS_KEY, TERMS_KEY, isPaperId, paperKey, getJson, putJson, exists, presignGet, presignPut,
   readIndex, updateJson, UpdateAborted, activeClaims, readClaims,
 };

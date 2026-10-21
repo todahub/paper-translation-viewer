@@ -9,6 +9,8 @@ const { runPipeline } = require('./lib/pipeline');
 const { ensureTranslatedPdf } = require('./lib/pdfGenerate');
 const { getCliInfo } = require('./lib/claudeTranslate');
 const shareClient = require('./lib/shareClient');
+const termBase = require('./lib/termBase');
+const { applyTermEdit } = require('./lib/termEdit');
 
 let shareConfig = shareClient.loadShareConfig();
 
@@ -180,7 +182,9 @@ function startTranslation(id) {
   const onTitle = shareConfig && meta.hash
     ? (title) => shareClient.claim(shareConfig, { id: meta.hash, filename: meta.filename, title, force: true }).catch(() => {})
     : undefined;
-  runPipeline(id, fs.readFileSync(store.paths(id).pdf), { model: meta.model, onTitle })
+  termBase.loadTerms(shareConfig)
+    .catch(() => [])
+    .then((terms) => runPipeline(id, fs.readFileSync(store.paths(id).pdf), { model: meta.model, onTitle, termBase: terms }))
     .catch((err) => {
       store.writeStatus(id, { state: 'error', processedChunks: 0, totalChunks: 0, message: String(err) });
       return 'error';
@@ -299,13 +303,43 @@ app.post('/api/documents/:id/publish', async (req, res) => {
     return;
   }
   try {
+    const result = store.readResult(req.params.id);
     const url = await shareClient.publish(shareConfig, req.params.id, { replace: !!(req.body && req.body.replace) });
     // The shared library now holds the master copy; the local draft is done.
     fs.rmSync(store.paths(req.params.id).dir, { recursive: true, force: true });
+    // Its terms join the shared term base, so later papers translate them
+    // the same way (terms already there are kept).
+    if (result && result.glossary) {
+      termBase.addTerms(shareConfig, result.glossary).catch((err) => console.warn('could not update the term base:', err.message));
+    }
     res.json({ url });
   } catch (err) {
     // 409: already shared — the page asks whether to replace it.
     res.status(err.status === 409 ? 409 : 500).json({ error: String(err && err.message ? err.message : err) });
+  }
+});
+
+// Correct a term in a draft: every Japanese sentence using the old rendering
+// is updated, the Japanese PDF is rebuilt, and the term base remembers the
+// correction for later papers.
+app.post('/api/documents/:id/terms', async (req, res) => {
+  if (!fromThisPc(req, res)) return;
+  const { en, ja } = req.body || {};
+  if (!en || !ja || !String(ja).trim()) {
+    res.status(400).json({ error: '訳語を入力してください' });
+    return;
+  }
+  try {
+    const { replaced, term } = applyTermEdit(req.params.id, String(en), String(ja).trim());
+    let warning = null;
+    try {
+      await termBase.addTerms(shareConfig, [term], { overwrite: true });
+    } catch (err) {
+      warning = `この論文は直しましたが、共有の用語ベースには保存できませんでした: ${err.message}`;
+    }
+    res.json({ replaced, term, warning });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

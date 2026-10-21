@@ -660,10 +660,36 @@ function showPdfTab() { showTab(tabPdfBtn, pdfPane); }
 function renderGlossary(result) {
   const terms = [...(result.glossary || [])].sort((a, b) => a.en.localeCompare(b.en, 'en', { sensitivity: 'base' }));
   tabGlossaryBtn.hidden = !terms.length;
+  // Drafts on this PC can have a term corrected; the fix is applied to the
+  // whole paper and remembered for later papers.
+  const editable = caps.mode === 'local' && result.meta;
   glossaryBody.innerHTML = terms
-    .map((t) => `<tr><td>${escapeHtml(t.en)}</td><td>${escapeHtml(t.ja)}</td></tr>`)
+    .map((t) => `<tr><td>${escapeHtml(t.en)}</td><td>${escapeHtml(t.ja)}</td>${editable ? `<td><button class="btn btn-small" data-en="${escapeHtml(t.en)}" data-ja="${escapeHtml(t.ja)}">直す</button></td>` : ''}</tr>`)
     .join('');
 }
+
+glossaryBody.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-en]');
+  if (!btn) return;
+  const ja = window.prompt(`「${btn.dataset.en}」の訳語を入力してください。この論文の訳がすべて置き換わり、今後の論文でもこの訳語が使われます。`, btn.dataset.ja);
+  if (!ja || ja.trim() === btn.dataset.ja) return;
+  btn.disabled = true;
+  const res = await fetch(`/api/documents/${currentDocId}/terms`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ en: btn.dataset.en, ja: ja.trim() }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    window.alert(data.error || '訳語を直せませんでした');
+    btn.disabled = false;
+    return;
+  }
+  await loadAndRenderResult(currentDocId);
+  showTab(tabGlossaryBtn, glossaryPane);
+  publishMessage.hidden = false;
+  publishMessage.textContent = `「${data.term.ja}」に直しました（${data.replaced}文）`;
+});
 
 tabTextBtn.addEventListener('click', showTextTab);
 tabPdfBtn.addEventListener('click', showPdfTab);
