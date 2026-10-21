@@ -75,11 +75,16 @@ a.btn { text-decoration: none; display: inline-block; }
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
 }
 .doc-list li:last-child { border-bottom: none; }
-.doc-list .doc-name { font-weight: 500; }
+.doc-list li > div { flex: 1; min-width: 0; }
+/* Long file names must not squeeze the badge/button into vertical text. */
+.doc-list li > .status-badge,
+.doc-list li > .btn { flex-shrink: 0; white-space: nowrap; }
+.doc-list .doc-name { font-weight: 500; overflow-wrap: anywhere; }
 .doc-list .doc-meta { color: var(--muted); font-size: 12px; }
 .doc-list .status-badge {
   font-size: 12px;
