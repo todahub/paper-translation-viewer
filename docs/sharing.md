@@ -13,12 +13,12 @@
 1. Cloudflare のダッシュボードで R2 を有効にし、バケットを1つ作る（例: `paper-library`）。公開アクセス（Public access）は**有効にしない**。
 2. 「R2 API トークン」を作る。権限は「Object Read & Write」、対象は作ったバケットだけ。表示される **Access Key ID** と **Secret Access Key** を控える（Secret は一度しか表示されない）。
 3. ダッシュボードに表示される **Account ID** を控える。
-4. バケットの設定 → CORS ポリシーに次を貼る（`<your-app>` は後で決まる Vercel のドメイン。手元で `vercel dev` を試すなら `http://localhost:3000` も残す）。
+4. バケットの設定 → CORS ポリシーに次を貼る。
 
 ```json
 [
   {
-    "AllowedOrigins": ["https://<your-app>.vercel.app", "http://localhost:3000"],
+    "AllowedOrigins": ["*"],
     "AllowedMethods": ["GET", "HEAD"],
     "AllowedHeaders": ["range"],
     "ExposeHeaders": ["Content-Range", "Accept-Ranges", "Content-Length", "Content-Type"],
@@ -27,7 +27,9 @@
 ]
 ```
 
-PDF は Vercel を経由せず、ブラウザが R2 から直接取得します。日本語PDF（十数MB）が、Vercel の関数が1回で返せる量（約4.5MB）を超えるためです。CORS は、その直接取得をこのアプリのページにだけ許可する設定です。`range` は、PDFを部分ごとに読み込んで最初のページを早く表示するために使います。
+PDF は Vercel を経由せず、ブラウザが R2 から直接取得します。日本語PDF（十数MB）が、Vercel の関数が1回で返せる量（約4.5MB）を超えるためです。CORS は、ページのプログラムがその直接取得をしてよいかをブラウザに伝える設定で、これが無いと画面内のPDF表示が真っ白になります（「PDFを開く」リンクでは開けるのに画面内に出ない、という症状）。
+
+`AllowedOrigins` を `"*"` にしているのは、Vercel のURLがデプロイごとに変わり、特定のURLを書くと合わなくなるためです。ファイルは期限付きの署名付きURLでしか取れないので、`"*"` にしても誰でも見られるようにはなりません。`range` は、PDFを部分ごとに読み込んで最初のページを早く表示するために使います。
 
 ## 2. Vercel
 

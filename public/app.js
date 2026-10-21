@@ -420,23 +420,40 @@ async function loadPdfCompare(id, result) {
     p.en_rects.forEach((rects, i) => rects.forEach((r) => enRects.push({ ...r, pid: p.id, idx: i + 1 })));
   }
 
-  const layoutRes = await fetch(`/api/documents/${id}/ja-layout`);
-  if (gen !== renderGeneration) return;
-  if (!layoutRes.ok) {
-    const err = await layoutRes.json().catch(() => ({}));
-    showPdfMessage(err.error || '日本語PDFの生成に失敗しました。');
+  // On the shared viewer these requests are redirected to R2; if R2's CORS
+  // rules don't allow this page's origin the browser rejects them with a bare
+  // network error, so say so instead of leaving the panes blank.
+  const loadFailed = () => showPdfMessage(caps.mode === 'web'
+    ? 'PDFを読み込めませんでした。共有ライブラリの保存先（Cloudflare R2）の CORS 設定で、このページのURLからの読み込みが許可されているか確認してください。「PDFを開く」からは開けます。'
+    : 'PDFを読み込めませんでした。ページを再読み込みしてください。');
+
+  let jaLayout;
+  try {
+    const layoutRes = await fetch(`/api/documents/${id}/ja-layout`);
+    if (gen !== renderGeneration) return;
+    if (!layoutRes.ok) {
+      const err = await layoutRes.json().catch(() => ({}));
+      showPdfMessage(err.error || '日本語PDFの生成に失敗しました。');
+      return;
+    }
+    jaLayout = await layoutRes.json();
+  } catch (err) {
+    if (gen === renderGeneration) loadFailed();
     return;
   }
-  const jaLayout = await layoutRes.json();
   const jaRects = [];
   for (const [pid, sentences] of Object.entries(jaLayout)) {
     sentences.forEach((rects, j) => rects.forEach((r) => jaRects.push({ ...r, pid, idx: j + 1 })));
   }
 
-  await Promise.all([
-    renderPdf(enPdf, `/api/documents/${id}/original.pdf`, enRects, 'en', gen),
-    renderPdf(jaPdf, `/api/documents/${id}/translated.pdf`, jaRects, 'ja', gen),
-  ]);
+  try {
+    await Promise.all([
+      renderPdf(enPdf, `/api/documents/${id}/original.pdf`, enRects, 'en', gen),
+      renderPdf(jaPdf, `/api/documents/${id}/translated.pdf`, jaRects, 'ja', gen),
+    ]);
+  } catch (err) {
+    if (gen === renderGeneration) loadFailed();
+  }
 }
 
 async function renderPdf(container, url, rects, side, gen) {
