@@ -156,24 +156,61 @@ app.post('/api/documents', upload.single('pdf'), async (req, res) => {
     }
   }
 
-  const id = store.createDocument(filename, hash);
+  const id = store.createDocument(filename, hash, req.body.model);
   fs.writeFileSync(store.paths(id).pdf, req.file.buffer);
-
-  const onTitle = shareConfig
-    ? (title) => shareClient.claim(shareConfig, { id: hash, filename, title, force: true }).catch(() => {})
-    : undefined;
-  runPipeline(id, req.file.buffer, { model: req.body.model, onTitle })
-    .catch((err) => {
-      store.writeStatus(id, { state: 'error', processedChunks: 0, totalChunks: 0, message: String(err) });
-    })
-    .then(() => {
-      // A failed translation shouldn't keep the paper marked as taken.
-      const status = store.readStatus(id);
-      if (shareConfig && status && status.state === 'error') shareClient.releaseClaim(shareConfig, hash).catch(() => {});
-    });
+  startTranslation(id);
 
   res.json({ id, reused: false });
 });
+
+// Documents whose translation is running in this process right now.
+const running = new Set();
+
+// Translate a stored document, or carry on with one that stopped (usage
+// limit, server restart, failed paragraphs). Paragraphs already translated
+// come from the cache, so a resumed run only pays for what's left.
+function startTranslation(id) {
+  if (running.has(id)) return;
+  const meta = store.readMeta(id);
+  if (!meta) return;
+  running.add(id);
+  store.writeStatus(id, { state: 'processing', processedChunks: 0, totalChunks: 0, message: '' });
+
+  // Also renews the "I'm translating this" claim each time a run starts.
+  const onTitle = shareConfig && meta.hash
+    ? (title) => shareClient.claim(shareConfig, { id: meta.hash, filename: meta.filename, title, force: true }).catch(() => {})
+    : undefined;
+  runPipeline(id, fs.readFileSync(store.paths(id).pdf), { model: meta.model, onTitle })
+    .catch((err) => {
+      store.writeStatus(id, { state: 'error', processedChunks: 0, totalChunks: 0, message: String(err) });
+      return 'error';
+    })
+    .then((state) => {
+      running.delete(id);
+      // A failed translation shouldn't keep the paper marked as taken.
+      if (shareConfig && meta.hash && state === 'error') shareClient.releaseClaim(shareConfig, meta.hash).catch(() => {});
+    });
+}
+
+// Resume paused translations once their limit has reset. Polled rather than
+// one timer per document, so a PC that slept past the reset time (timers
+// don't advance during sleep) still picks up right after waking.
+const RESUME_CHECK_MS = 60 * 1000;
+function resumeDueTranslations() {
+  for (const doc of store.listDocuments()) {
+    if (doc.status !== 'paused') continue;
+    const status = store.readStatus(doc.id);
+    if (status && Date.parse(status.resumeAt) <= Date.now()) {
+      console.log(`resuming ${doc.id} after usage limit`);
+      startTranslation(doc.id);
+    }
+  }
+}
+
+function hasFailedParagraphs(id) {
+  const result = store.readResult(id);
+  return !!result && result.paragraphs.some((p) => p.ja_sentences.includes('(翻訳に失敗しました)'));
+}
 
 app.get('/api/documents/:id/status', (req, res) => {
   const status = store.readStatus(req.params.id);
@@ -184,6 +221,30 @@ app.get('/api/documents/:id/status', (req, res) => {
   res.json(status);
 });
 
+// "Resume now" for a paused or failed translation, and "retry the failed
+// paragraphs" for a finished one.
+app.post('/api/documents/:id/resume', async (req, res) => {
+  const status = store.readStatus(req.params.id);
+  if (!status) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  if (status.state === 'processing' || running.has(req.params.id)) {
+    res.json({ ok: true });
+    return;
+  }
+  if (status.state === 'done' && !hasFailedParagraphs(req.params.id)) {
+    res.status(400).json({ error: '翻訳し直す段落はありません' });
+    return;
+  }
+  if (!(await getCliInfo()).usable) {
+    res.status(400).json({ error: '翻訳するには Claude CLI が必要です' });
+    return;
+  }
+  startTranslation(req.params.id);
+  res.json({ ok: true });
+});
+
 app.get('/api/documents/:id/result', (req, res) => {
   const result = store.readResult(req.params.id);
   if (!result) {
@@ -191,7 +252,7 @@ app.get('/api/documents/:id/result', (req, res) => {
     return;
   }
   const meta = store.readMeta(req.params.id);
-  res.json({ ...result, meta });
+  res.json({ ...result, meta, hasFailed: hasFailedParagraphs(req.params.id) });
 });
 
 app.get('/api/documents/:id/original.pdf', (req, res) => {
@@ -277,6 +338,15 @@ function lanAddresses() {
 
 app.listen(PORT, () => {
   console.log(`transrate_reserch server listening on http://localhost:${PORT}`);
+  // A run still marked "processing" was cut off when the server stopped.
+  for (const doc of store.listDocuments()) {
+    if (doc.status === 'processing') {
+      console.log(`resuming ${doc.id}, interrupted by a restart`);
+      startTranslation(doc.id);
+    }
+  }
+  resumeDueTranslations();
+  setInterval(resumeDueTranslations, RESUME_CHECK_MS);
   for (const addr of lanAddresses()) {
     console.log(`  同じネットワーク内の他の端末からは http://${addr}:${PORT} でアクセスできます`);
   }

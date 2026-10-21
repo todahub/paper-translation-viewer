@@ -14,6 +14,9 @@ const docList = document.getElementById('docList');
 const progressFill = document.getElementById('progressFill');
 const progressText = document.getElementById('progressText');
 const progressError = document.getElementById('progressError');
+const progressTitle = document.getElementById('progressTitle');
+const resumeBtn = document.getElementById('resumeBtn');
+const retryFailedBtn = document.getElementById('retryFailedBtn');
 
 const viewerTitle = document.getElementById('viewerTitle');
 const enColumn = document.getElementById('enColumn');
@@ -216,6 +219,7 @@ function escapeHtml(s) {
 function statusLabel(state) {
   if (state === 'done') return '完了';
   if (state === 'error') return 'エラー';
+  if (state === 'paused') return '一時停止中';
   return '処理中';
 }
 
@@ -298,7 +302,14 @@ function watchProgress(id) {
     const status = await res.json();
     const pct = status.totalChunks ? Math.round((status.processedChunks / status.totalChunks) * 100) : 0;
     progressFill.style.width = pct + '%';
-    if (status.message && status.state === 'processing') {
+    const paused = status.state === 'paused';
+    progressTitle.textContent = paused ? '一時停止中' : '翻訳中...';
+    // Paused for a usage limit: the server resumes on its own; keep polling
+    // so the page follows along, and offer to try right away.
+    resumeBtn.hidden = !(paused || (status.state === 'error' && caps.canTranslate));
+    resumeBtn.textContent = paused ? '今すぐ再開' : 'もう一度試す';
+    resumeBtn.onclick = () => resumeTranslation(id);
+    if (status.message && (status.state === 'processing' || paused)) {
       progressText.textContent = status.message;
     } else {
       progressText.textContent = status.totalChunks
@@ -318,6 +329,20 @@ function watchProgress(id) {
   pollTimer = setInterval(tick, 1500);
 }
 
+// Carry on with a paused/failed translation, or redo the failed paragraphs
+// of a finished one; already translated paragraphs are reused for free.
+async function resumeTranslation(id) {
+  const res = await fetch(`/api/documents/${id}/resume`, { method: 'POST' });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    window.alert(data.error || '再開できませんでした');
+    return;
+  }
+  showView(progressView);
+  progressError.hidden = true;
+  watchProgress(id);
+}
+
 async function loadAndRenderResult(id) {
   const res = await fetch(`/api/documents/${id}/result`);
   const result = await res.json();
@@ -329,6 +354,8 @@ async function loadAndRenderResult(id) {
   translatorInfo.textContent = (draftMode() ? '下書き（まだ共有ライブラリにありません）・' : '') + describeTranslator(result);
   publishMessage.hidden = true;
   publishBtn.hidden = !(caps && caps.canPublish);
+  retryFailedBtn.hidden = !(caps.mode === 'local' && caps.canTranslate && result.hasFailed);
+  retryFailedBtn.onclick = () => resumeTranslation(id);
   renderTextView(result);
   showView(viewerView);
   showPdfTab();
