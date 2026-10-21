@@ -44,6 +44,13 @@ const docListTitle = document.getElementById('docListTitle');
 const addGuide = document.getElementById('addGuide');
 const claimsPanel = document.getElementById('claimsPanel');
 const claimList = document.getElementById('claimList');
+const docListNote = document.getElementById('docListNote');
+const sharedPanel = document.getElementById('sharedPanel');
+const sharedList = document.getElementById('sharedList');
+
+// Local app with a shared library configured: the shared library is the
+// master copy and local documents are only drafts awaiting review.
+const draftMode = () => caps && caps.mode === 'local' && caps.canPublish;
 
 // What this server can do. The same page runs on the local server
 // (translate + view) and on the shared web viewer (view only, login needed).
@@ -143,32 +150,63 @@ function statusLabel(state) {
   return '処理中';
 }
 
+function docItem(doc, onOpen) {
+  const li = document.createElement('li');
+  const left = document.createElement('div');
+  const by = doc.publishedBy ? `・公開: ${escapeHtml(doc.publishedBy)}` : '';
+  const file = doc.title ? `・${escapeHtml(doc.filename)}` : '';
+  left.innerHTML = `<div class="doc-name">${escapeHtml(doc.title || doc.filename)}</div>
+    <div class="doc-meta">${new Date(doc.createdAt).toLocaleString('ja-JP')}${by}${file}</div>`;
+  li.appendChild(left);
+  li.style.cursor = 'pointer';
+  li.addEventListener('click', onOpen);
+  return li;
+}
+
 async function loadDocList() {
-  const res = await fetch('/api/documents');
-  const docs = await res.json();
+  const docs = await (await fetch('/api/documents')).json();
+  docListTitle.textContent = caps.mode === 'web' ? '共有ライブラリ' : draftMode() ? '自分の下書き（未公開）' : 'これまでに処理したPDF';
+  docListNote.hidden = !draftMode();
   docList.innerHTML = '';
   if (!docs.length) {
-    docList.innerHTML = caps && caps.mode === 'web'
+    docList.innerHTML = caps.mode === 'web'
       ? '<li class="doc-meta">まだ共有された論文はありません</li>'
-      : '<li class="doc-meta">まだ処理したPDFはありません</li>';
-    return;
+      : draftMode() ? '<li class="doc-meta">未公開の下書きはありません</li>' : '<li class="doc-meta">まだ処理したPDFはありません</li>';
   }
   for (const doc of docs) {
-    const li = document.createElement('li');
-    const left = document.createElement('div');
-    const by = doc.publishedBy ? `・公開: ${escapeHtml(doc.publishedBy)}` : '';
-    const file = doc.title ? `・${escapeHtml(doc.filename)}` : '';
-    left.innerHTML = `<div class="doc-name">${escapeHtml(doc.title || doc.filename)}</div>
-      <div class="doc-meta">${new Date(doc.createdAt).toLocaleString('ja-JP')}${by}${file}</div>`;
+    const li = docItem(doc, () => { location.hash = `#/doc/${doc.id}`; });
     const badge = document.createElement('span');
     badge.className = 'status-badge';
     badge.textContent = statusLabel(doc.status);
-    li.appendChild(left);
     li.appendChild(badge);
-    li.style.cursor = 'pointer';
-    li.addEventListener('click', () => { location.hash = `#/doc/${doc.id}`; });
+    if (caps.mode === 'local' && doc.status !== 'processing') {
+      const del = document.createElement('button');
+      del.className = 'btn';
+      del.textContent = '削除';
+      del.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!window.confirm(`「${doc.title || doc.filename}」をこのPCから削除しますか？`)) return;
+        await fetch(`/api/documents/${doc.id}`, { method: 'DELETE' });
+        loadDocList();
+      });
+      li.appendChild(del);
+    }
     docList.appendChild(li);
   }
+  if (draftMode()) loadSharedList();
+}
+
+// Local draft mode: show the shared library (the master copy) below the drafts.
+async function loadSharedList() {
+  sharedPanel.hidden = false;
+  const res = await fetch('/api/shared-documents');
+  if (!res.ok) {
+    sharedList.innerHTML = '<li class="doc-meta">共有ライブラリに接続できませんでした</li>';
+    return;
+  }
+  const docs = await res.json();
+  sharedList.innerHTML = docs.length ? '' : '<li class="doc-meta">まだ共有された論文はありません</li>';
+  for (const doc of docs) sharedList.appendChild(docItem(doc, () => window.open(doc.url, '_blank', 'noopener')));
 }
 
 async function openDocument(id) {
@@ -219,7 +257,7 @@ async function loadAndRenderResult(id) {
   paragraphById = new Map(result.paragraphs.map((p) => [p.id, p]));
   viewerTitle.textContent = result.meta ? result.meta.filename : '';
   downloadJaBtn.href = `/api/documents/${id}/translated.pdf?download=1`;
-  translatorInfo.textContent = describeTranslator(result);
+  translatorInfo.textContent = (draftMode() ? '下書き（まだ共有ライブラリにありません）・' : '') + describeTranslator(result);
   publishMessage.hidden = true;
   publishBtn.hidden = !(caps && caps.canPublish);
   renderTextView(result);
@@ -253,7 +291,10 @@ publishBtn.addEventListener('click', async () => {
     const res = await fetch(`/api/documents/${currentDocId}/publish`, { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '公開に失敗しました');
-    publishMessage.innerHTML = `公開しました: <a href="${escapeHtml(data.url)}" target="_blank" rel="noopener">共有ライブラリで開く</a>`;
+    // The draft now lives only in the shared library; go back home.
+    location.hash = '#/';
+    uploadNotice.hidden = false;
+    uploadNotice.innerHTML = `公開しました。下書きはこのPCから削除しました。<a href="${escapeHtml(data.url)}" target="_blank" rel="noopener">共有ライブラリで開く</a>`;
   } catch (err) {
     publishMessage.textContent = err.message;
   } finally {

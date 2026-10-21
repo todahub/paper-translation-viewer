@@ -42,8 +42,22 @@ app.get('/api/documents', (req, res) => {
   res.json(store.listDocuments());
 });
 
-// The shared "who is translating what" board, relayed so the local page can
-// show it too (the browser can't send the shared password itself).
+// With a shared library configured it is the single source of truth: the
+// local page lists it (relayed, since the browser can't send the shared
+// password itself) and local documents are only unpublished drafts.
+app.get('/api/shared-documents', async (req, res) => {
+  if (!shareConfig) {
+    res.json([]);
+    return;
+  }
+  try {
+    res.json(await shareClient.listDocuments(shareConfig));
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// The shared "who is translating what" board, relayed the same way.
 app.get('/api/shared-claims', async (req, res) => {
   if (!shareConfig) {
     res.json({ claims: [] });
@@ -192,10 +206,28 @@ app.post('/api/documents/:id/publish', async (req, res) => {
   }
   try {
     const url = await shareClient.publish(shareConfig, req.params.id);
+    // The shared library now holds the master copy; the local draft is done.
+    fs.rmSync(store.paths(req.params.id).dir, { recursive: true, force: true });
     res.json({ url });
   } catch (err) {
     res.status(500).json({ error: String(err && err.message ? err.message : err) });
   }
+});
+
+app.delete('/api/documents/:id', (req, res) => {
+  const meta = store.readMeta(req.params.id);
+  if (!meta) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  const status = store.readStatus(req.params.id);
+  if (status && status.state === 'processing') {
+    res.status(409).json({ error: '翻訳中の文書は削除できません' });
+    return;
+  }
+  fs.rmSync(store.paths(req.params.id).dir, { recursive: true, force: true });
+  if (shareConfig && meta.hash) shareClient.releaseClaim(shareConfig, meta.hash).catch(() => {});
+  res.json({ ok: true });
 });
 
 function lanAddresses() {

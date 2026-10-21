@@ -62,7 +62,14 @@
 
     <section class="panel">
       <h2 id="docListTitle">これまでに処理したPDF</h2>
+      <p id="docListNote" class="doc-meta" hidden>翻訳が終わった論文は、ここで内容を確認してから「共有ライブラリに公開」を押してください。公開すると共有ライブラリに移り、このPCからは消えます。</p>
       <ul id="docList" class="doc-list"></ul>
+    </section>
+
+    <section id="sharedPanel" class="panel" hidden>
+      <h2>共有ライブラリ</h2>
+      <p class="doc-meta">公開済みの論文です。クリックすると閲覧用のWebで開きます。</p>
+      <ul id="sharedList" class="doc-list"></ul>
     </section>
   </main>
 

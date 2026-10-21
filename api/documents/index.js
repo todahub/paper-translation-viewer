@@ -1,9 +1,11 @@
-const { requireViewer } = require('../_lib/auth');
+const { isViewer, requirePublisher } = require('../_lib/auth');
 const { readIndex } = require('../_lib/r2');
 
 // Same shape as the local server's /api/documents so the page needs no changes.
+// Readable by a logged-in browser, or by a translator's local app with the
+// shared password (it shows the shared library as its home screen).
 module.exports = async (req, res) => {
-  if (!requireViewer(req, res)) return;
+  if (!isViewer(req) && !(await requirePublisher(req, res))) return;
   const { papers } = await readIndex();
   const docs = papers
     .map((p) => ({
