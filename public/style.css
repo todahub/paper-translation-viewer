@@ -225,6 +225,11 @@ a.btn { text-decoration: none; display: inline-block; }
   border-bottom: 1px solid var(--border);
 }
 
+.glossary-pane { padding: 20px 24px; overflow-y: auto; max-height: calc(100vh - 110px); }
+.glossary-table { border-collapse: collapse; width: 100%; max-width: 760px; font-size: 14px; }
+.glossary-table th, .glossary-table td { text-align: left; padding: 6px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.glossary-table th { color: var(--muted); font-weight: 600; }
+
 .paragraph { margin-bottom: 16px; line-height: 1.9; }
 .paragraph.heading { font-weight: 700; font-size: 1.08em; margin-top: 24px; }
 .paragraph.caption { font-size: 0.92em; color: var(--muted); }

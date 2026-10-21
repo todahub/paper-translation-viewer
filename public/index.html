@@ -97,6 +97,7 @@
       <div class="viewer-tabs">
         <button id="tabPdfBtn" class="tab-btn active">PDFで比較</button>
         <button id="tabTextBtn" class="tab-btn">テキスト対訳</button>
+        <button id="tabGlossaryBtn" class="tab-btn">用語集</button>
         <a id="downloadJaBtn" class="btn btn-primary">日本語PDFを保存</a>
         <button id="publishBtn" class="btn" hidden>共有ライブラリに公開</button>
         <button id="retryFailedBtn" class="btn" hidden>失敗した段落を訳し直す</button>
@@ -114,6 +115,13 @@
         <h2>日本語訳</h2>
         <div id="jaColumn" class="column-body"></div>
       </section>
+    </div>
+    <div id="glossaryPane" class="glossary-pane" hidden>
+      <p class="hint">この論文の翻訳で使った訳語です。翻訳の前に論文全体から作り、全体で同じ訳語を使っています。</p>
+      <table class="glossary-table">
+        <thead><tr><th>English</th><th>日本語</th></tr></thead>
+        <tbody id="glossaryBody"></tbody>
+      </table>
     </div>
     <div id="pdfPane" class="pdf-columns">
       <section class="pdf-column">

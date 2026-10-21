@@ -357,6 +357,7 @@ async function loadAndRenderResult(id) {
   retryFailedBtn.hidden = !(caps.mode === 'local' && caps.canTranslate && result.hasFailed);
   retryFailedBtn.onclick = () => resumeTranslation(id);
   renderTextView(result);
+  renderGlossary(result);
   showView(viewerView);
   showPdfTab();
   loadPdfCompare(id, result);
@@ -637,22 +638,31 @@ for (const c of [enPdf, jaPdf]) {
 
 // ---------- Tabs / upload ----------
 
-function showTextTab() {
-  tabTextBtn.classList.add('active');
-  tabPdfBtn.classList.remove('active');
-  textPane.hidden = false;
-  pdfPane.hidden = true;
+const tabGlossaryBtn = document.getElementById('tabGlossaryBtn');
+const glossaryPane = document.getElementById('glossaryPane');
+const glossaryBody = document.getElementById('glossaryBody');
+
+function showTab(btn, pane) {
+  for (const [b, p] of [[tabTextBtn, textPane], [tabPdfBtn, pdfPane], [tabGlossaryBtn, glossaryPane]]) {
+    b.classList.toggle('active', b === btn);
+    p.hidden = p !== pane;
+  }
 }
 
-function showPdfTab() {
-  tabTextBtn.classList.remove('active');
-  tabPdfBtn.classList.add('active');
-  textPane.hidden = true;
-  pdfPane.hidden = false;
+function showTextTab() { showTab(tabTextBtn, textPane); }
+function showPdfTab() { showTab(tabPdfBtn, pdfPane); }
+
+function renderGlossary(result) {
+  const terms = [...(result.glossary || [])].sort((a, b) => a.en.localeCompare(b.en, 'en', { sensitivity: 'base' }));
+  tabGlossaryBtn.hidden = !terms.length;
+  glossaryBody.innerHTML = terms
+    .map((t) => `<tr><td>${escapeHtml(t.en)}</td><td>${escapeHtml(t.ja)}</td></tr>`)
+    .join('');
 }
 
 tabTextBtn.addEventListener('click', showTextTab);
 tabPdfBtn.addEventListener('click', showPdfTab);
+tabGlossaryBtn.addEventListener('click', () => showTab(tabGlossaryBtn, glossaryPane));
 
 async function submitUpload(force) {
   uploadError.hidden = true;
