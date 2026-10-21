@@ -1,6 +1,6 @@
-// Friends-only access with one shared password: the browser exchanges it for
-// a signed session cookie, and a translator's local app sends it directly
-// when publishing (anyone who can log in can also publish).
+// Friends-only access: the browser exchanges the shared viewing password for
+// a signed session cookie; a translator's local app sends the publishing
+// password (PUBLISH_PASSWORD, or the viewing password if unset) directly.
 
 const crypto = require('crypto');
 
@@ -20,6 +20,13 @@ function safeEqual(a, b) {
 
 function checkPassword(password) {
   return !!process.env.VIEW_PASSWORD && safeEqual(password || '', process.env.VIEW_PASSWORD);
+}
+
+// Publishing uses PUBLISH_PASSWORD when set (so only its holder can add
+// papers), otherwise the shared viewing password.
+function checkPublishPassword(password) {
+  const expected = process.env.PUBLISH_PASSWORD || process.env.VIEW_PASSWORD;
+  return !!expected && safeEqual(password || '', expected);
 }
 
 function sessionCookie() {
@@ -51,11 +58,11 @@ function requireViewer(req, res) {
 }
 
 // Publishing from a translator's local app: "Authorization: Bearer <password>"
-// plus a self-declared display name in X-Publisher-Name (URI-encoded, since
+// plus an optional display name in X-Publisher-Name (URI-encoded, since
 // headers must be ASCII). Returns the name, or null after sending 401.
 async function requirePublisher(req, res) {
   const m = /^Bearer\s+(.+)$/.exec(req.headers.authorization || '');
-  if (!m || !checkPassword(m[1].trim())) {
+  if (!m || !checkPublishPassword(m[1].trim())) {
     await new Promise((r) => setTimeout(r, 800));
     res.status(401).json({ error: 'パスワードが違います' });
     return null;

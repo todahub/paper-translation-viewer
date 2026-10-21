@@ -41,7 +41,11 @@ const uploadNotice = document.getElementById('uploadNotice');
 const installGuide = document.getElementById('installGuide');
 const installGuideText = document.getElementById('installGuideText');
 const docListTitle = document.getElementById('docListTitle');
-const addGuide = document.getElementById('addGuide');
+// While only the owner publishes, the library is shown as a plain library:
+// no publisher names and no "who is translating what" board. Flip this to
+// bring both back once friends publish too.
+const SHOW_PEOPLE = false;
+
 const claimsPanel = document.getElementById('claimsPanel');
 const claimList = document.getElementById('claimList');
 const docListNote = document.getElementById('docListNote');
@@ -78,7 +82,6 @@ async function loadCapabilities() {
   if (caps.mode === 'web') {
     uploadPanel.hidden = true;
     installGuide.hidden = true;
-    addGuide.hidden = false;
     docListTitle.textContent = '共有ライブラリ';
   } else if (!caps.canTranslate) {
     uploadPanel.hidden = true;
@@ -101,7 +104,7 @@ function timeAgo(iso) {
 // publishing to a shared library is configured).
 async function loadClaims() {
   const url = caps.mode === 'web' ? '/api/claims' : (caps.canPublish ? '/api/shared-claims' : null);
-  if (!url) {
+  if (!url || !SHOW_PEOPLE) {
     claimsPanel.hidden = true;
     return;
   }
@@ -129,7 +132,6 @@ connectForm.addEventListener('submit', async (e) => {
       body: JSON.stringify({
         shareUrl: document.getElementById('shareUrlInput').value,
         password: document.getElementById('sharePasswordInput').value,
-        name: document.getElementById('shareNameInput').value,
       }),
     });
     const data = await res.json();
@@ -185,7 +187,7 @@ function statusLabel(state) {
 function docItem(doc, onOpen) {
   const li = document.createElement('li');
   const left = document.createElement('div');
-  const by = doc.publishedBy ? `・公開: ${escapeHtml(doc.publishedBy)}` : '';
+  const by = SHOW_PEOPLE && doc.publishedBy ? `・公開: ${escapeHtml(doc.publishedBy)}` : '';
   const file = doc.title ? `・${escapeHtml(doc.filename)}` : '';
   left.innerHTML = `<div class="doc-name">${escapeHtml(doc.title || doc.filename)}</div>
     <div class="doc-meta">${new Date(doc.createdAt).toLocaleString('ja-JP')}${by}${file}</div>`;
@@ -298,14 +300,16 @@ async function loadAndRenderResult(id) {
   loadPdfCompare(id, result);
 }
 
+// Translation details are for translators; the shared library stays plain.
 function describeTranslator(result) {
+  if (caps.mode === 'web') return '';
   const t = result.translator;
   const parts = [];
   if (t) {
     if (t.models && t.models.length) parts.push(`翻訳: ${t.models.join(', ')}`);
     if (t.skill) parts.push(`Skill版 ${t.skill}`);
   }
-  if (result.meta && result.meta.publishedBy) parts.push(`公開: ${result.meta.publishedBy}`);
+  if (SHOW_PEOPLE && result.meta && result.meta.publishedBy) parts.push(`公開: ${result.meta.publishedBy}`);
   return parts.join('・');
 }
 

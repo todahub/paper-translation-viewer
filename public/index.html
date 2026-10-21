@@ -48,22 +48,13 @@
 
     <section id="connectPanel" class="panel" hidden>
       <h2>共有ライブラリに接続</h2>
-      <p class="doc-meta">接続すると、翻訳した論文をここから共有ライブラリに公開できます。URL は Vercel の Settings → Domains に出ている本番用のもの、パスワードは閲覧用と同じものです。</p>
+      <p class="doc-meta">接続すると、翻訳した論文をここから共有ライブラリに公開できます。URL は Vercel の Settings → Domains に出ている本番用のもの、パスワードは公開用のもの（Vercel に <code>PUBLISH_PASSWORD</code> を設定していなければ閲覧用と同じ）です。</p>
       <form id="connectForm" class="connect-form">
         <input type="url" id="shareUrlInput" placeholder="https://〇〇.vercel.app" required />
-        <input type="password" id="sharePasswordInput" placeholder="パスワード" required autocomplete="off" />
-        <input type="text" id="shareNameInput" placeholder="表示する名前" required maxlength="40" />
+        <input type="password" id="sharePasswordInput" placeholder="公開用パスワード" required autocomplete="off" />
         <button type="submit" class="btn btn-primary">接続</button>
       </form>
       <p id="connectError" class="error" hidden></p>
-    </section>
-
-    <section id="addGuide" class="panel" hidden>
-      <h2>論文を追加するには</h2>
-      <p>
-        翻訳は各自のPCの Claude CLI で行うため、このページからは追加できません。翻訳用アプリ（このリポジトリ）を自分のPCで起動し、
-        翻訳が終わった論文の「共有ライブラリに公開」ボタンから追加します。準備の手順はリポジトリの <code>docs/translator-setup.md</code> にあります。
-      </p>
     </section>
 
     <section id="claimsPanel" class="panel" hidden>
