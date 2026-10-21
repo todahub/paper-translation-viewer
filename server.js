@@ -116,8 +116,9 @@ app.post('/api/documents', upload.single('pdf'), async (req, res) => {
   }
 
   // Someone may already have translated and shared this paper; reuse theirs
-  // instead of spending this user's Claude quota on it again.
-  if (shareConfig) {
+  // instead of spending this user's Claude quota on it again — unless the
+  // user explicitly chose to re-translate it (e.g. after the rules improved).
+  if (shareConfig && req.body.force !== '1') {
     try {
       const sharedUrl = await shareClient.findInLibrary(shareConfig, hash);
       if (sharedUrl) {
@@ -237,12 +238,13 @@ app.post('/api/documents/:id/publish', async (req, res) => {
     return;
   }
   try {
-    const url = await shareClient.publish(shareConfig, req.params.id);
+    const url = await shareClient.publish(shareConfig, req.params.id, { replace: !!(req.body && req.body.replace) });
     // The shared library now holds the master copy; the local draft is done.
     fs.rmSync(store.paths(req.params.id).dir, { recursive: true, force: true });
     res.json({ url });
   } catch (err) {
-    res.status(500).json({ error: String(err && err.message ? err.message : err) });
+    // 409: already shared — the page asks whether to replace it.
+    res.status(err.status === 409 ? 409 : 500).json({ error: String(err && err.message ? err.message : err) });
   }
 });
 

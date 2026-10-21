@@ -24,25 +24,27 @@ module.exports = async (req, res) => {
     }
   }
 
-  const { filename, title, translator } = req.body || {};
+  const { filename, title, translator, replace } = req.body || {};
   try {
     await r2.updateJson(r2.INDEX_KEY, { papers: [] }, (data) => {
       const papers = data.papers || [];
-      if (papers.some((p) => p.id === id)) throw new r2.UpdateAborted('exists');
-      return {
-        papers: [...papers, {
-          id,
-          filename: String(filename || 'document.pdf').slice(0, 300),
-          title: String(title || '').slice(0, 300),
-          createdAt: new Date().toISOString(),
-          publishedBy: publisher,
-          translator: translator || null,
-        }],
+      const prev = papers.find((p) => p.id === id);
+      if (prev && !replace) throw new r2.UpdateAborted('exists');
+      const now = new Date().toISOString();
+      const entry = {
+        id,
+        filename: String(filename || 'document.pdf').slice(0, 300),
+        title: String(title || '').slice(0, 300),
+        createdAt: prev ? prev.createdAt : now,
+        ...(prev ? { updatedAt: now } : {}),
+        publishedBy: publisher,
+        translator: translator || null,
       };
+      return { papers: [...papers.filter((p) => p.id !== id), entry] };
     });
   } catch (err) {
     if (err instanceof r2.UpdateAborted) {
-      res.status(409).json({ error: 'この論文はすでに共有ライブラリにあります' });
+      res.status(409).json({ error: 'この論文はすでに共有ライブラリにあります', exists: true });
       return;
     }
     throw err;

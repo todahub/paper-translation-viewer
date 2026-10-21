@@ -12,16 +12,16 @@ module.exports = async (req, res) => {
   }
   if (!(await requirePublisher(req, res))) return;
 
-  const { id, files } = req.body || {};
+  const { id, files, replace } = req.body || {};
   if (!r2.isPaperId(id) || !Array.isArray(files)) {
     res.status(400).json({ error: 'invalid request' });
     return;
   }
-  // Anyone who knows the password can publish, so never hand out upload URLs
-  // that would overwrite a paper someone else already shared.
+  // Don't hand out upload URLs that would overwrite a shared paper unless
+  // the publisher explicitly asked to replace it (e.g. after re-translating).
   const { papers } = await r2.readIndex();
-  if (papers.some((p) => p.id === id)) {
-    res.status(409).json({ error: 'この論文はすでに共有ライブラリにあります' });
+  if (papers.some((p) => p.id === id) && !replace) {
+    res.status(409).json({ error: 'この論文はすでに共有ライブラリにあります', exists: true });
     return;
   }
   const names = files.map((f) => f.name).sort();

@@ -359,8 +359,21 @@ publishBtn.addEventListener('click', async () => {
   publishMessage.hidden = false;
   publishMessage.textContent = '公開しています...';
   try {
-    const res = await fetch(`/api/documents/${currentDocId}/publish`, { method: 'POST' });
-    const data = await res.json();
+    const post = (replace) => fetch(`/api/documents/${currentDocId}/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ replace }),
+    });
+    let res = await post(false);
+    let data = await res.json();
+    if (res.status === 409) {
+      if (!window.confirm('この論文はすでに共有ライブラリにあります。今の訳で置き換えますか？（元の訳は残りません）')) {
+        publishMessage.textContent = '公開を取りやめました';
+        return;
+      }
+      res = await post(true);
+      data = await res.json();
+    }
     if (!res.ok) throw new Error(data.error || '公開に失敗しました');
     // The draft now lives only in the shared library; go back home.
     location.hash = '#/';
@@ -627,9 +640,10 @@ async function submitUpload(force) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'アップロードに失敗しました');
     if (data.sharedUrl) {
-      pdfInput.value = '';
       uploadNotice.hidden = false;
-      uploadNotice.innerHTML = `この論文は共有ライブラリで翻訳済みです。翻訳はしませんでした。<a href="${escapeHtml(data.sharedUrl)}" target="_blank" rel="noopener">共有ライブラリで開く</a>`;
+      uploadNotice.innerHTML = `この論文は共有ライブラリで翻訳済みです。翻訳はしませんでした。<a href="${escapeHtml(data.sharedUrl)}" target="_blank" rel="noopener">共有ライブラリで開く</a>
+        <button type="button" id="retranslateBtn" class="btn">それでも訳し直す</button>`;
+      document.getElementById('retranslateBtn').addEventListener('click', () => submitUpload(true));
       return;
     }
     if (data.inProgress) {
