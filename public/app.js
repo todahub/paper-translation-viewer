@@ -371,6 +371,11 @@ function describeTranslator(result) {
   if (t) {
     if (t.models && t.models.length) parts.push(`翻訳: ${t.models.join(', ')}`);
     if (t.skill) parts.push(`Skill版 ${t.skill}`);
+    // Tokens this paper took (cached prompt reads are cheaper and listed apart).
+    if (t.usage && t.usage.calls && (t.usage.input || t.usage.output || t.usage.cacheWrite)) {
+      const k = (n) => `${Math.round(n / 1000)}k`;
+      parts.push(`使用トークン 入力${k(t.usage.input + t.usage.cacheWrite)}＋キャッシュ${k(t.usage.cacheRead)}・出力${k(t.usage.output)}（${t.usage.calls}回）`);
+    }
   }
   if (SHOW_PEOPLE && result.meta && result.meta.publishedBy) parts.push(`公開: ${result.meta.publishedBy}`);
   return parts.join('・');
