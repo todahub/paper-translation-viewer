@@ -45,20 +45,33 @@ app.get('/api/documents', (req, res) => {
 // Connect this app to a shared library from the page instead of hand-editing
 // config.local.json. Only from this PC itself: the app is reachable over the
 // LAN, and nobody else should be able to redirect where papers get published.
-app.post('/api/share-config', async (req, res) => {
+function fromThisPc(req, res) {
   const ip = req.socket.remoteAddress || '';
-  if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip)) {
-    res.status(403).json({ error: '接続設定はこのPCからのみ変更できます' });
-    return;
-  }
+  if (['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip)) return true;
+  res.status(403).json({ error: '接続設定はこのPCからのみ変更できます' });
+  return false;
+}
+
+app.post('/api/share-config', async (req, res) => {
+  if (!fromThisPc(req, res)) return;
+  const body = req.body || {};
+  // Changing only the URL (e.g. a new Vercel domain) keeps the saved password.
+  const password = body.password || (shareConfig && shareConfig.password) || '';
   try {
-    const cfg = await shareClient.verifyShareConfig(req.body || {});
+    const cfg = await shareClient.verifyShareConfig({ ...body, password, name: body.name ?? (shareConfig && shareConfig.name) });
     shareClient.saveShareConfig(cfg);
     shareConfig = cfg;
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+app.delete('/api/share-config', (req, res) => {
+  if (!fromThisPc(req, res)) return;
+  shareClient.clearShareConfig();
+  shareConfig = null;
+  res.json({ ok: true });
 });
 
 // With a shared library configured it is the single source of truth: the

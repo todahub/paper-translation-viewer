@@ -52,6 +52,11 @@ const docListNote = document.getElementById('docListNote');
 const connectPanel = document.getElementById('connectPanel');
 const connectForm = document.getElementById('connectForm');
 const connectError = document.getElementById('connectError');
+const connectedInfo = document.getElementById('connectedInfo');
+const connectedUrl = document.getElementById('connectedUrl');
+const connectHelp = document.getElementById('connectHelp');
+const shareUrlInput = document.getElementById('shareUrlInput');
+const sharePasswordInput = document.getElementById('sharePasswordInput');
 const sharedPanel = document.getElementById('sharedPanel');
 const sharedList = document.getElementById('sharedList');
 
@@ -78,7 +83,7 @@ function showView(view) {
 
 async function loadCapabilities() {
   caps = await (await fetch('/api/capabilities')).json();
-  connectPanel.hidden = !(caps.mode === 'local' && !caps.canPublish);
+  showConnection(false);
   if (caps.mode === 'web') {
     uploadPanel.hidden = true;
     installGuide.hidden = true;
@@ -119,6 +124,36 @@ async function loadClaims() {
     claimList.appendChild(li);
   }
 }
+
+// Local app: either the connect form, or the current connection with
+// "change" (e.g. the Vercel URL changed) and "disconnect".
+function showConnection(editing) {
+  connectPanel.hidden = caps.mode !== 'local';
+  const connected = !!caps.canPublish;
+  connectedInfo.hidden = !connected || editing;
+  connectHelp.hidden = connected && !editing;
+  connectForm.hidden = connected && !editing;
+  connectError.hidden = true;
+  if (connected) {
+    connectedUrl.textContent = caps.shareUrl;
+    connectedUrl.href = caps.shareUrl;
+  }
+  sharePasswordInput.required = !connected;
+  sharePasswordInput.placeholder = connected ? '公開用パスワード（変えない場合は空欄）' : '公開用パスワード';
+}
+
+document.getElementById('changeConnectionBtn').addEventListener('click', () => {
+  shareUrlInput.value = caps.shareUrl || '';
+  showConnection(true);
+  shareUrlInput.focus();
+});
+
+document.getElementById('disconnectBtn').addEventListener('click', async () => {
+  if (!window.confirm('共有ライブラリとの接続を切りますか？（公開済みの論文は消えません）')) return;
+  await fetch('/api/share-config', { method: 'DELETE' });
+  await loadCapabilities();
+  route();
+});
 
 connectForm.addEventListener('submit', async (e) => {
   e.preventDefault();
