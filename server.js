@@ -91,6 +91,36 @@ app.get('/api/shared-documents', async (req, res) => {
   }
 });
 
+// Take a published paper back as a local draft to correct it (paragraph
+// fixes, term fixes), then publish it again to replace the shared copy.
+app.post('/api/shared-documents/:paperId/checkout', async (req, res) => {
+  if (!fromThisPc(req, res)) return;
+  if (!shareConfig) {
+    res.status(400).json({ error: '共有ライブラリに接続されていません' });
+    return;
+  }
+  const paperId = req.params.paperId;
+  const existing = store.findByHash(paperId);
+  if (existing) {
+    res.json({ id: existing.id });
+    return;
+  }
+  try {
+    const { result, pdf } = await shareClient.fetchPaper(shareConfig, paperId);
+    const { meta: sharedMeta, ...rest } = result;
+    const id = store.createDocument((sharedMeta && sharedMeta.filename) || 'document.pdf', paperId);
+    const p = store.paths(id);
+    fs.writeFileSync(p.pdf, pdf);
+    store.writeResult(id, rest);
+    const meta = store.readMeta(id);
+    fs.writeFileSync(p.meta, JSON.stringify({ ...meta, title: (sharedMeta && sharedMeta.title) || rest.title || '', fromShared: true }, null, 2));
+    store.writeStatus(id, { state: 'done', processedChunks: 0, totalChunks: 0, message: '' });
+    res.json({ id });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
 // The shared "who is translating what" board, relayed the same way.
 app.get('/api/shared-claims', async (req, res) => {
   if (!shareConfig) {

@@ -282,7 +282,30 @@ async function loadSharedList() {
   }
   const docs = await res.json();
   sharedList.innerHTML = docs.length ? '' : '<li class="doc-meta">まだ共有された論文はありません</li>';
-  for (const doc of docs) sharedList.appendChild(docItem(doc, () => window.open(doc.url, '_blank', 'noopener')));
+  for (const doc of docs) {
+    const li = docItem(doc, () => window.open(doc.url, '_blank', 'noopener'));
+    // Translators can take a published paper back to fix it and republish.
+    if (caps.canTranslate) {
+      const fix = document.createElement('button');
+      fix.className = 'btn';
+      fix.textContent = '直す';
+      fix.title = 'この論文を下書きとして取り込み、訳を直してから公開し直します';
+      fix.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        fix.disabled = true;
+        const res = await fetch(`/api/shared-documents/${doc.id}/checkout`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        fix.disabled = false;
+        if (!res.ok) {
+          window.alert(data.error || '取り込めませんでした');
+          return;
+        }
+        location.hash = `#/doc/${data.id}`;
+      });
+      li.appendChild(fix);
+    }
+    sharedList.appendChild(li);
+  }
 }
 
 async function openDocument(id) {
@@ -354,7 +377,10 @@ async function loadAndRenderResult(id) {
   paragraphById = new Map(result.paragraphs.map((p) => [p.id, p]));
   viewerTitle.textContent = result.meta ? result.meta.filename : '';
   downloadJaBtn.href = `/api/documents/${id}/translated.pdf?download=1`;
-  translatorInfo.textContent = (draftMode() ? '下書き（まだ共有ライブラリにありません）・' : '') + describeTranslator(result);
+  const draftNote = result.meta && result.meta.fromShared
+    ? '共有ライブラリから取り込んだ下書き（直したら「共有ライブラリに公開」で差し替え）・'
+    : '下書き（まだ共有ライブラリにありません）・';
+  translatorInfo.textContent = (draftMode() ? draftNote : '') + describeTranslator(result);
   publishMessage.hidden = true;
   publishBtn.hidden = !(caps && caps.canPublish);
   retryFailedBtn.hidden = !(caps.mode === 'local' && caps.canTranslate && result.hasFailed);

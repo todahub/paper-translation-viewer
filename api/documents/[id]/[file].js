@@ -1,4 +1,4 @@
-const { requireViewer } = require('../../_lib/auth');
+const { isViewer, requirePublisher } = require('../../_lib/auth');
 const r2 = require('../../_lib/r2');
 
 function redirect(res, url) {
@@ -12,8 +12,10 @@ function redirect(res, url) {
 // Mirrors the local server's per-document endpoints. Large files are not
 // proxied (Vercel functions can only return ~4.5MB); the browser is sent to a
 // presigned R2 URL and downloads directly from R2.
+// Readable by a logged-in browser, or by a translator's local app with the
+// shared password (to take a published paper back as a draft and fix it).
 module.exports = async (req, res) => {
-  if (!requireViewer(req, res)) return;
+  if (!isViewer(req) && !(await requirePublisher(req, res))) return;
   const { id, file } = req.query;
   if (!r2.isPaperId(id)) {
     res.status(404).json({ error: 'not found' });
