@@ -17,6 +17,9 @@ const progressError = document.getElementById('progressError');
 const progressTitle = document.getElementById('progressTitle');
 const resumeBtn = document.getElementById('resumeBtn');
 const retryFailedBtn = document.getElementById('retryFailedBtn');
+const fixParaBtn = document.getElementById('fixParaBtn');
+// The paragraph whose sentence was clicked last (for "fix this paragraph").
+let selectedPid = null;
 
 const viewerTitle = document.getElementById('viewerTitle');
 const enColumn = document.getElementById('enColumn');
@@ -356,6 +359,8 @@ async function loadAndRenderResult(id) {
   publishBtn.hidden = !(caps && caps.canPublish);
   retryFailedBtn.hidden = !(caps.mode === 'local' && caps.canTranslate && result.hasFailed);
   retryFailedBtn.onclick = () => resumeTranslation(id);
+  selectedPid = null;
+  updateFixButton();
   renderTextView(result);
   renderGlossary(result);
   showView(viewerView);
@@ -460,12 +465,62 @@ function renderTextView(result) {
   }
 }
 
+// Drafts on this PC: a clicked paragraph can be re-translated with an
+// instruction. Equations, references etc. aren't translated, so not offered.
+function updateFixButton() {
+  const para = selectedPid && paragraphById.get(selectedPid);
+  const draft = caps.mode === 'local' && caps.canTranslate && currentResult && currentResult.meta;
+  fixParaBtn.hidden = !(draft && para && !para.keep);
+}
+
+function selectParagraph(pid) {
+  selectedPid = pid;
+  updateFixButton();
+}
+
+fixParaBtn.addEventListener('click', async () => {
+  const para = paragraphById.get(selectedPid);
+  if (!para) return;
+  const instruction = window.prompt(
+    'この段落をどう直しますか？（例: 「〜」を「…」と訳す、もっと短い文に分ける、意味が逆になっている）\n空欄のままOKを押すと、より正確で自然な訳を作り直します。\n\n'
+      + para.en_sentences.join(' ').slice(0, 300),
+    '',
+  );
+  if (instruction === null) return;
+  fixParaBtn.disabled = true;
+  const label = fixParaBtn.textContent;
+  fixParaBtn.textContent = '直しています...';
+  try {
+    const res = await fetch(`/api/documents/${currentDocId}/paragraphs/${selectedPid}/retranslate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instruction }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      window.alert(data.error || '直せませんでした');
+      return;
+    }
+    const pid = selectedPid;
+    const onText = !textPane.hidden;
+    await loadAndRenderResult(currentDocId);
+    if (onText) showTextTab();
+    selectParagraph(pid);
+    publishMessage.hidden = false;
+    publishMessage.textContent = data.issues ? '段落を直しました（数値や数式の記号に抜けがないか確認してください）' : '段落を直しました';
+  } finally {
+    fixParaBtn.disabled = false;
+    fixParaBtn.textContent = label;
+  }
+});
+
 function onTextSentenceClick(e) {
   const span = e.target.closest('.sent');
   if (!span || !currentResult) return;
   const { pid, side } = span.dataset;
   const paragraph = paragraphById.get(pid);
   if (!paragraph) return;
+  selectParagraph(pid);
   const group = findGroup(paragraph, side, Number(span.dataset.idx));
   document.querySelectorAll('.sent.active').forEach((el) => el.classList.remove('active'));
   if (!group) {
@@ -624,6 +679,7 @@ function onPdfClick(e) {
   const idx = Number(el.dataset.idx);
   const paragraph = paragraphById.get(pid);
   if (!paragraph) return;
+  selectParagraph(pid);
   pdfPane.querySelectorAll('.hl.active').forEach((x) => x.classList.remove('active'));
   const group = findGroup(paragraph, side, idx) || { en: side === 'en' ? [idx] : [], ja: side === 'ja' ? [idx] : [] };
   for (const i of group.en) sentenceEls('en', pid, i).forEach((x) => x.classList.add('active'));

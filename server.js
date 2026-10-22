@@ -5,7 +5,7 @@ const express = require('express');
 const multer = require('multer');
 
 const store = require('./lib/store');
-const { runPipeline } = require('./lib/pipeline');
+const { runPipeline, retranslateParagraph } = require('./lib/pipeline');
 const { ensureTranslatedPdf } = require('./lib/pdfGenerate');
 const { getCliInfo } = require('./lib/claudeTranslate');
 const shareClient = require('./lib/shareClient');
@@ -340,6 +340,25 @@ app.post('/api/documents/:id/terms', async (req, res) => {
     res.json({ replaced, term, warning });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// "Fix this part": re-translate one paragraph of a draft with an instruction.
+app.post('/api/documents/:id/paragraphs/:pid/retranslate', async (req, res) => {
+  if (!fromThisPc(req, res)) return;
+  if (running.has(req.params.id)) {
+    res.status(409).json({ error: '翻訳中は直せません。終わってからお試しください。' });
+    return;
+  }
+  const instruction = String((req.body && req.body.instruction) || '').trim().slice(0, 1000);
+  try {
+    res.json(await retranslateParagraph(req.params.id, req.params.pid, instruction));
+  } catch (err) {
+    if (err.rateLimited) {
+      res.status(429).json({ error: 'Claude の利用上限に達しています。上限が戻ってからもう一度お試しください。' });
+      return;
+    }
+    res.status(err.status || (err.fatal ? 400 : 500)).json({ error: err.message });
   }
 });
 
