@@ -267,7 +267,11 @@ app.post('/api/documents/:id/resume', async (req, res) => {
     res.json({ ok: true });
     return;
   }
-  if (status.state === 'done' && !hasFailedParagraphs(req.params.id)) {
+  // rebuild: read the PDF again with the current code. The draft's glossary
+  // and every paragraph whose English didn't change come from the cache, so
+  // only the changed paragraphs are sent to Claude.
+  const rebuild = !!(req.body && req.body.rebuild);
+  if (status.state === 'done' && !rebuild && !hasFailedParagraphs(req.params.id)) {
     res.status(400).json({ error: '翻訳し直す段落はありません' });
     return;
   }

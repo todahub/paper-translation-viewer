@@ -18,6 +18,7 @@ const progressTitle = document.getElementById('progressTitle');
 const resumeBtn = document.getElementById('resumeBtn');
 const retryFailedBtn = document.getElementById('retryFailedBtn');
 const fixParaBtn = document.getElementById('fixParaBtn');
+const rebuildBtn = document.getElementById('rebuildBtn');
 // The paragraph whose sentence was clicked last (for "fix this paragraph").
 let selectedPid = null;
 
@@ -387,6 +388,28 @@ async function loadAndRenderResult(id) {
   retryFailedBtn.onclick = () => resumeTranslation(id);
   selectedPid = null;
   updateFixButton();
+  rebuildBtn.hidden = !(caps.mode === 'local' && caps.canTranslate && result.meta);
+  rebuildBtn.onclick = async () => {
+    // A paper taken back from the shared library has no saved glossary, so
+    // nothing can be reused: say so before spending a full translation.
+    const message = result.meta.fromShared
+      ? 'PDFの読み取り（数式・図・表の分け方）を最新の方式でやり直します。共有ライブラリから取り込んだ論文なので、全体を訳し直します（論文1本分の利用枠を使います）。よろしいですか？'
+      : 'PDFの読み取り（数式・図・表の分け方）を最新の方式でやり直します。文が変わった段落だけをClaudeで訳し直し、それ以外はこれまでの訳を使います。よろしいですか？';
+    if (!window.confirm(message)) return;
+    const res = await fetch(`/api/documents/${id}/resume`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rebuild: true }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      window.alert(data.error || 'やり直せませんでした');
+      return;
+    }
+    showView(progressView);
+    progressError.hidden = true;
+    watchProgress(id);
+  };
   renderTextView(result);
   renderGlossary(result);
   showView(viewerView);
